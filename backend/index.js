@@ -20,6 +20,7 @@ app.use(express.json({ limit: '50mb' })); // Increased limit for larger images
 const PORT = process.env.PORT || 5000;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const REPLICATE_API_TOKEN = process.env.REPLICATE_API_TOKEN;
+const PUBLIC_BACKEND_URL = process.env.PUBLIC_BACKEND_URL;
 
 if (!OPENAI_API_KEY) {
   console.error('Missing OPENAI_API_KEY in .env');
@@ -367,6 +368,14 @@ app.post('/api/replicate/ideogram', async (req, res) => {
       return res.status(500).json({ error: 'Missing REPLICATE_API_TOKEN in .env' });
     }
     const replicate = new Replicate({ auth: REPLICATE_API_TOKEN });
+
+    // Define effectiveServerUrl for Replicate callbacks
+    let effectiveServerUrl = process.env.PUBLIC_BACKEND_URL;
+    if (!effectiveServerUrl) {
+      effectiveServerUrl = `http://localhost:${PORT}`; // PORT is already defined globally as const PORT = process.env.PORT || 5000;
+      console.warn(`[WARN] PUBLIC_BACKEND_URL is not set. Defaulting to ${effectiveServerUrl}. Replicate may not be able to access temporary image/mask URLs unless this server is publicly accessible and PUBLIC_BACKEND_URL is configured to its public address.`);
+    }
+
     const {
       prompt,
       negative_prompt,
@@ -410,7 +419,7 @@ app.post('/api/replicate/ideogram', async (req, res) => {
           // Save the image to a file and get a URL
           const imageUrl = await saveBase64ToFile(image, 'image');
           // Convert to absolute URL with hostname
-          const serverUrl = `http://localhost:${PORT}`;
+          const serverUrl = effectiveServerUrl;
           input.image = `${serverUrl}${imageUrl}`;
           console.log('Saved image to file and using URL:', input.image);
         }
@@ -429,7 +438,7 @@ app.post('/api/replicate/ideogram', async (req, res) => {
           // Save the mask to a file and get a URL
           const maskUrl = await saveBase64ToFile(mask, 'mask');
           // Convert to absolute URL with hostname
-          const serverUrl = `http://localhost:${PORT}`;
+          const serverUrl = effectiveServerUrl;
           input.mask = `${serverUrl}${maskUrl}`;
           console.log('Saved mask to file and using URL:', input.mask);
         }
