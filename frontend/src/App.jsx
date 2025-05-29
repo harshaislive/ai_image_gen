@@ -82,7 +82,7 @@ function GenerateButton({ loading, prompt, file, tab, handleGenerate, timer }) {
 // --- Main App Component ---
 export default function App() {
   // All state declarations first
-  const [tab, setTab] = useState('text'); // 'text', 'image', 'mask'
+  const [tab, setTab] = useState('text'); // 'text', 'image'
   const [prompt, setPrompt] = useState('');
   const [image, setImage] = useState(null);
   const [file, setFile] = useState(null);
@@ -202,45 +202,6 @@ export default function App() {
     document.body.removeChild(link);
   };
 
-  // --- Utility: Apply Mask to Image ---
-  const applyMaskToImage = (imageSrc, maskSrc) => {
-    return new Promise((resolve) => {
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      const img = new window.Image();
-      img.crossOrigin = 'Anonymous';
-      img.onload = () => {
-        canvas.width = img.width;
-        canvas.height = img.height;
-        const maskImage = new window.Image();
-        maskImage.crossOrigin = 'Anonymous';
-        maskImage.onload = () => {
-          if (img.width !== maskImage.width || img.height !== maskImage.height) {
-            setError('Image and mask dimensions must match to create masked image.');
-            resolve(null);
-            return;
-          }
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          ctx.drawImage(img, 0, 0);
-          ctx.globalCompositeOperation = 'destination-in';
-          ctx.drawImage(maskImage, 0, 0);
-          ctx.globalCompositeOperation = 'source-over';
-          resolve(canvas.toDataURL('image/png'));
-        };
-        maskImage.onerror = () => {
-          setError('Failed to load mask image.');
-          resolve(null);
-        };
-        maskImage.src = maskSrc;
-      };
-      img.onerror = () => {
-        setError('Failed to load original image.');
-        resolve(null);
-      };
-      img.src = imageSrc;
-    });
-  };
-
 // --- Main Render ---
   return (
     <div className="min-h-screen font-sans bg-off-white bg-[url('/brand-bg.jpg')] bg-cover bg-center bg-no-repeat flex flex-col items-center justify-center py-8">
@@ -279,17 +240,6 @@ export default function App() {
                   onClick={() => { setTab('image'); setResult(null); setError(''); }}
                 >
                   🖼️ Image to Image
-                </button>
-                <button
-                  type="button"
-                  className={`flex-1 py-3 px-4 rounded-lg font-medium transition-all duration-200 ${
-                    tab === 'mask'
-                      ? 'bg-off-white text-deep-blue shadow-md font-sans'
-                      : 'text-charcoal-gray font-sans hover:text-gray-800'
-                  }`}
-                  onClick={() => { setTab('mask'); setResult(null); setError(''); }}
-                >
-                  🎭 Mask & Download
                 </button>
               </div>
             </div>
@@ -480,125 +430,6 @@ export default function App() {
                             Edit This Result
                           </button>
                         </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* MASK & DOWNLOAD TAB */}
-            {tab === 'mask' && (
-              <div className="space-y-6">
-                {/* Upload Area */}
-                {!originalFile && (
-                  <div className="border-2 border-dashed border-soft-gray rounded-xl p-8 text-center">
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleFileChange}
-                      className="hidden"
-                      id="maskTabImageUpload"
-                    />
-                    <label
-                      htmlFor="maskTabImageUpload"
-                      className="cursor-pointer flex flex-col items-center justify-center gap-3"
-                    >
-                      <div className="w-16 h-16 bg-soft-gray/30 rounded-full flex items-center justify-center">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8 text-charcoal-gray">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
-                        </svg>
-                      </div>
-                      <div>
-                        <p className="font-medium text-charcoal-gray font-sans">Upload an image to create masks</p>
-                        <p className="text-sm text-charcoal-gray/60 mt-1 font-sans">PNG, JPG, or WEBP (max 4MB)</p>
-                      </div>
-                    </label>
-                    <div className="mt-6 flex justify-center">
-                      <div className="flex items-center gap-2 text-xs text-charcoal-gray/60">
-                        <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded">1. Upload</span>
-                        <span>→</span>
-                        <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded">2. Draw Mask</span>
-                        <span>→</span>
-                        <span className="bg-green-100 text-green-800 px-2 py-1 rounded">3. Download</span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-                {/* Mask Editor & Download Buttons */}
-                {originalFile && (
-                  <div className="space-y-6">
-                    {/* Mask Editor */}
-                    <div className="space-y-4">
-                      <div className="flex justify-between items-center mb-4">
-                        <h3 className="text-lg font-medium text-charcoal-gray font-sans">Edit Mask</h3>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setOriginalFile(null);
-                            setFile(null);
-                            setImage(null);
-                            setMask(null);
-                          }}
-                          className="text-sm text-deep-blue hover:text-dark-blue transition-colors duration-200 font-sans"
-                        >
-                          Change Image
-                        </button>
-                      </div>
-                      <div className={`grid grid-cols-1 ${mask ? 'md:grid-cols-2' : 'md:grid-cols-1'} gap-4 md:gap-6 mb-6`}>
-                        {/* Mask Editor - Full width when no mask */}
-                        <div className={`space-y-4 overflow-hidden ${!mask ? 'col-span-full w-full mx-auto max-w-3xl' : ''}`}>
-                          <MaskEditor imageUrl={URL.createObjectURL(originalFile)} onMaskChange={setMask} />
-                        </div>
-                        {/* Preview Area (if mask exists) */}
-                        {mask && (
-                          <div className="space-y-4">
-                            <div className="flex justify-between items-center">
-                              <h3 className="text-lg font-medium text-charcoal-gray font-sans">Mask Preview</h3>
-                              <button
-                                type="button"
-                                onClick={() => downloadImage(mask, 'mask.png')}
-                                className="text-sm text-deep-blue hover:text-dark-blue transition-colors duration-200 flex items-center gap-1 font-sans"
-                              >
-                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
-                                </svg>
-                                Download
-                              </button>
-                            </div>
-                            <div className="relative rounded-xl overflow-hidden border border-soft-gray bg-off-white w-full">
-                              <img
-                                src={mask}
-                                alt="Mask preview"
-                                className="w-full h-auto object-contain max-h-[512px]"
-                              />
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    {/* Download Buttons */}
-                    {mask && (
-                      <div className="flex flex-wrap gap-3 justify-center">
-                        <button
-                          type="button"
-                          onClick={() => downloadImage(mask, 'mask.png')}
-                          className="inline-flex items-center gap-2 px-6 py-3 bg-deep-blue text-white rounded-xl hover:bg-dark-blue transition-colors duration-200 shadow-md hover:shadow-lg font-sans"
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
-                          Download Mask
-                        </button>
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            const maskedImg = await applyMaskToImage(URL.createObjectURL(originalFile), mask);
-                            if (maskedImg) downloadImage(maskedImg, 'masked-image.png');
-                          }}
-                          className="inline-flex items-center gap-2 px-6 py-3 bg-forest-green text-white rounded-xl hover:bg-opacity-80 transition-colors duration-200 shadow-md hover:shadow-lg font-sans"
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
-                          Download Masked Image
-                        </button>
                       </div>
                     )}
                   </div>
