@@ -143,21 +143,31 @@ app.post('/api/edit', async (req, res) => {
     const maskPath = mask ? path.join(__dirname, 'tmp', `mask_${timestamp}.png`) : null;
     fs.writeFileSync(imgPath, imageBuffer);
     if (mask && maskBuffer) {
-      // Convert mask to RGBA with alpha channel encoding mask shape
-      const sharp = (await import('sharp')).default;
-      const maskSharp = sharp(maskBuffer).ensureAlpha();
-      const { data, info } = await maskSharp.raw().toBuffer({ resolveWithObject: true });
-      // Create a new buffer for RGBA where alpha = mask (white=255, black=0)
-      const rgba = Buffer.alloc(info.width * info.height * 4);
-      for (let i = 0; i < info.width * info.height; i++) {
-        // Use the grayscale value as alpha, set RGB=0
-        const value = data[i];
-        rgba[i * 4 + 0] = 0; // R
-        rgba[i * 4 + 1] = 0; // G
-        rgba[i * 4 + 2] = 0; // B
-        rgba[i * 4 + 3] = value; // Alpha
+      const sharp = (await import('sharp')).default; // Ensure sharp is available in this scope if not already.
+      // Process the mask: ensure it's RGBA, then use its luminance for the new alpha.
+      // The input mask from frontend is B&W (black for edit, white for preserve).
+      // We need an output mask for OpenAI where RGB is black, and Alpha is:
+      //   0 (transparent) for 'edit' areas (frontend black).
+      //   255 (opaque) for 'preserve' areas (frontend white).
+
+      // Convert the input mask to raw grayscale pixel data first.
+      const { data: maskPixelData, info: maskInfo } = await sharp(maskBuffer)
+        .greyscale() // Convert to single channel grayscale
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+
+      // Create a new buffer for the final RGBA mask.
+      const finalMaskRgbaBuffer = Buffer.alloc(maskInfo.width * maskInfo.height * 4);
+      for (let i = 0; i < maskInfo.width * maskInfo.height; i++) {
+        const grayscaleValue = maskPixelData[i]; // This is the grayscale value (0 for black, 255 for white).
+        finalMaskRgbaBuffer[i * 4 + 0] = 0;   // R channel = 0
+        finalMaskRgbaBuffer[i * 4 + 1] = 0;   // G channel = 0
+        finalMaskRgbaBuffer[i * 4 + 2] = 0;   // B channel = 0
+        finalMaskRgbaBuffer[i * 4 + 3] = grayscaleValue; // Alpha channel = grayscale value
       }
-      await sharp(rgba, { raw: { width: info.width, height: info.height, channels: 4 } })
+
+      // Save the newly created RGBA mask to a file.
+      await sharp(finalMaskRgbaBuffer, { raw: { width: maskInfo.width, height: maskInfo.height, channels: 4 } })
         .png()
         .toFile(maskPath);
     }

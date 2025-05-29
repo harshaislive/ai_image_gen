@@ -202,12 +202,22 @@ const MaskEditor = ({ imageUrl, onMaskChange }) => {
       canvas.width = imageSize.width;
       canvas.height = imageSize.height;
 
-      // Always use white mask on black background for best results with OpenAI API
-      const backgroundColor = isMaskInverted ? 'white' : 'black';
-      const strokeColor = isMaskInverted ? 'black' : 'white';
+      const editColor = 'black';
+      const preserveColor = 'white';
+
+      let actualStrokeColor;
+      let actualBackgroundColor;
+
+      if (isMaskInverted) {
+        actualStrokeColor = preserveColor;
+        actualBackgroundColor = editColor;
+      } else {
+        actualStrokeColor = editColor;
+        actualBackgroundColor = preserveColor;
+      }
 
       // Fill with background color
-      context.fillStyle = backgroundColor;
+      context.fillStyle = actualBackgroundColor;
       context.fillRect(0, 0, canvas.width, canvas.height);
 
       // Calculate scale ratios to map from stage coordinates to original image coordinates
@@ -224,8 +234,8 @@ const MaskEditor = ({ imageUrl, onMaskChange }) => {
         
         context.beginPath();
         context.lineWidth = line.brushSize * Math.max(scaleX, scaleY);
-        // Brush draws with strokeColor, eraser draws with backgroundColor
-        context.strokeStyle = line.tool === 'brush' ? strokeColor : backgroundColor;
+        // Brush draws with actualStrokeColor, eraser draws with actualBackgroundColor
+        context.strokeStyle = line.tool === 'brush' ? actualStrokeColor : actualBackgroundColor;
 
         // Start the path
         const startX = line.points[0] * scaleX;
