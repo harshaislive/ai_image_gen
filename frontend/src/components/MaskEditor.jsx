@@ -3,6 +3,8 @@ import { Stage, Layer, Image, Line } from 'react-konva';
 import useImage from 'use-image';
 
 const MaskEditor = ({ imageUrl, onMaskChange }) => {
+  const [maskMode, setMaskMode] = useState('draw'); // 'draw' or 'url'
+  const [maskUrl, setMaskUrl] = useState('');
   const [image] = useImage(imageUrl);
   const [lines, setLines] = useState([]);
   const [linesHistory, setLinesHistory] = useState([]); 
@@ -20,6 +22,8 @@ const MaskEditor = ({ imageUrl, onMaskChange }) => {
     setLines([]);
     setLinesHistory([]);
     setIsMaskInverted(false);
+    setMaskUrl('');
+    setMaskMode('draw');
     // Clear any pending mask generation
     if (maskGenerationTimeoutRef.current) {
       clearTimeout(maskGenerationTimeoutRef.current);
@@ -27,6 +31,13 @@ const MaskEditor = ({ imageUrl, onMaskChange }) => {
     // Also clear mask when image changes
     onMaskChange(null);
   }, [imageUrl, onMaskChange]);
+
+  // When mask URL changes and maskMode is 'url', call onMaskChange
+  useEffect(() => {
+    if (maskMode === 'url' && maskUrl.trim() !== '') {
+      onMaskChange(maskUrl.trim());
+    }
+  }, [maskUrl, maskMode, onMaskChange]);
 
   // Stage container reference to get dimensions
   const containerRef = useRef(null);
@@ -127,38 +138,100 @@ const MaskEditor = ({ imageUrl, onMaskChange }) => {
     setIsDrawing(false);
   }, []);
 
-  // Debounced mask generation for better performance
-  const debouncedGenerateMask = useCallback(() => {
-    // Clear any existing timeout
+  // Function to generate mask
+  const generateMask = useCallback(() => {
+    // Only generate mask if we have an image and lines
+    if (!image || lines.length === 0) {
+      console.log('No mask to generate: image or lines missing');
+      onMaskChange(null);
+      return;
+    }
+    
+    try {
+      // Create canvas for mask
+      const canvas = document.createElement('canvas');
+      canvas.width = imageSize.width;
+      canvas.height = imageSize.height;
+      const ctx = canvas.getContext('2d');
+      
+      // Set background color based on inversion
+      ctx.fillStyle = isMaskInverted ? 'black' : 'white';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      // Set drawing color based on inversion
+      ctx.fillStyle = isMaskInverted ? 'white' : 'black';
+      ctx.strokeStyle = isMaskInverted ? 'white' : 'black';
+      
+      // Calculate scale factors
+      const scaleX = imageSize.width / stageSize.width;
+      const scaleY = imageSize.height / stageSize.height;
+      
+      // Draw all lines
+      lines.forEach(line => {
+        // Skip if no points
+        if (line.points.length < 2) return;
+        
+        ctx.beginPath();
+        ctx.lineWidth = line.brushSize * Math.max(scaleX, scaleY);
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        
+        // Move to first point
+        const startX = line.points[0] * scaleX;
+        const startY = line.points[1] * scaleY;
+        ctx.moveTo(startX, startY);
+        
+        // Draw line segments
+        for (let i = 2; i < line.points.length; i += 2) {
+          const x = line.points[i] * scaleX;
+          const y = line.points[i + 1] * scaleY;
+          ctx.lineTo(x, y);
+        }
+        
+        ctx.stroke();
+        
+        // For single points (dots), draw a circle
+        if (line.points.length === 2) {
+          ctx.beginPath();
+          ctx.arc(
+            startX, 
+            startY, 
+            (line.brushSize / 2) * Math.max(scaleX, scaleY), 
+            0, 
+            Math.PI * 2
+          );
+          ctx.fill();
+        }
+      });
+      
+      // Convert to data URL and pass to parent
+      const maskDataUrl = canvas.toDataURL('image/png');
+      console.log('MASK GENERATED SUCCESSFULLY - Length:', maskDataUrl.length);
+      onMaskChange(maskDataUrl);
+    } catch (error) {
+      console.error('Error generating mask:', error);
+      onMaskChange(null);
+    }
+  }, [image, lines, imageSize, stageSize, isMaskInverted, onMaskChange]);
+
+  // Generate mask when lines or inversion state changes
+  useEffect(() => {
+    // Clear any previous timeout
     if (maskGenerationTimeoutRef.current) {
       clearTimeout(maskGenerationTimeoutRef.current);
     }
     
-    // Set a new timeout for mask generation
+    // Debounce mask generation to avoid too many updates
     maskGenerationTimeoutRef.current = setTimeout(() => {
       generateMask();
-    }, 100); // Generate mask 100ms after user stops drawing
-  }, []);
-
-  // Effect to regenerate mask when lines or inversion state change
-  useEffect(() => {
-    if (image && lines.length > 0) {
-      debouncedGenerateMask();
-    } else if (image && lines.length === 0) {
-      // Clear mask when no lines
-      if (maskGenerationTimeoutRef.current) {
-        clearTimeout(maskGenerationTimeoutRef.current);
-      }
-      onMaskChange(null);
-    }
+    }, 100); // Debounce for 100ms
     
-    // Cleanup timeout on unmount
     return () => {
       if (maskGenerationTimeoutRef.current) {
         clearTimeout(maskGenerationTimeoutRef.current);
       }
     };
-  }, [lines, isMaskInverted, image, debouncedGenerateMask, onMaskChange]);
+  }, [lines, isMaskInverted, generateMask]);
 
   const clearMask = useCallback(() => {
     // Save current state before clearing
@@ -189,96 +262,6 @@ const MaskEditor = ({ imageUrl, onMaskChange }) => {
       setLinesHistory(prev => prev.slice(0, -1));
     }
   }, [linesHistory]);
-
-  const generateMask = useCallback(() => {
-    if (!stageRef.current || !image || lines.length === 0) return;
-    
-    try {
-      // Create a temporary canvas to draw the mask at the original image size
-      const canvas = document.createElement('canvas');
-      const context = canvas.getContext('2d');
-      
-      // Set canvas dimensions to match the original image dimensions
-      canvas.width = imageSize.width;
-      canvas.height = imageSize.height;
-
-      const editColor = 'black';
-      const preserveColor = 'white';
-
-      let actualStrokeColor;
-      let actualBackgroundColor;
-
-      if (isMaskInverted) {
-        actualStrokeColor = preserveColor;
-        actualBackgroundColor = editColor;
-      } else {
-        actualStrokeColor = editColor;
-        actualBackgroundColor = preserveColor;
-      }
-
-      // Fill with background color
-      context.fillStyle = actualBackgroundColor;
-      context.fillRect(0, 0, canvas.width, canvas.height);
-
-      // Calculate scale ratios to map from stage coordinates to original image coordinates
-      const scaleX = imageSize.width / stageSize.width;
-      const scaleY = imageSize.height / stageSize.height;
-
-      // Set common drawing properties
-      context.lineJoin = 'round';
-      context.lineCap = 'round';
-
-      // Draw each line on the canvas
-      lines.forEach(line => {
-        if (!line.points || line.points.length < 4) return; // Need at least 2 points (4 coordinates)
-        
-        context.beginPath();
-        context.lineWidth = line.brushSize * Math.max(scaleX, scaleY);
-        // Brush draws with actualStrokeColor, eraser draws with actualBackgroundColor
-        context.strokeStyle = line.tool === 'brush' ? actualStrokeColor : actualBackgroundColor;
-
-        // Start the path
-        const startX = line.points[0] * scaleX;
-        const startY = line.points[1] * scaleY;
-        context.moveTo(startX, startY);
-
-        // Draw line segments
-        for (let i = 2; i < line.points.length; i += 2) {
-          const x = line.points[i] * scaleX;
-          const y = line.points[i + 1] * scaleY;
-          context.lineTo(x, y);
-        }
-        
-        context.stroke();
-      });
-
-      // Binarize the mask to ensure only black and white pixels
-      const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-      const data = imageData.data;
-      for (let i = 0; i < data.length; i += 4) {
-        // If any channel is not black, set it to white, else keep black
-        const isMasked = data[i] > 127 || data[i+1] > 127 || data[i+2] > 127;
-        if (isMasked) {
-          data[i] = 255;
-          data[i+1] = 255;
-          data[i+2] = 255;
-          data[i+3] = 255;
-        } else {
-          data[i] = 0;
-          data[i+1] = 0;
-          data[i+2] = 0;
-          data[i+3] = 255;
-        }
-      }
-      context.putImageData(imageData, 0, 0);
-      // Convert to base64 and send to parent
-      const maskDataUrl = canvas.toDataURL('image/png');
-      onMaskChange(maskDataUrl);
-    } catch (error) {
-      console.error('Error generating mask:', error);
-      onMaskChange(null);
-    }
-  }, [image, imageSize, stageSize, lines, isMaskInverted, onMaskChange]);
 
   // Use ResizeObserver to respond to container size changes
   useEffect(() => {
@@ -431,6 +414,46 @@ const MaskEditor = ({ imageUrl, onMaskChange }) => {
         </div>
       </div>
 
+      {/* Mask Mode Switch */}
+      <div className="flex gap-4 mb-4">
+        <label className="flex items-center gap-2">
+          <input
+            type="radio"
+            name="maskMode"
+            value="draw"
+            checked={maskMode === 'draw'}
+            onChange={() => { setMaskMode('draw'); onMaskChange(null); }}
+          />
+          Draw Mask
+        </label>
+        <label className="flex items-center gap-2">
+          <input
+            type="radio"
+            name="maskMode"
+            value="url"
+            checked={maskMode === 'url'}
+            onChange={() => { setMaskMode('url'); setLines([]); setLinesHistory([]); onMaskChange(maskUrl.trim()); }}
+          />
+          Use Mask URL
+        </label>
+      </div>
+
+      {/* Mask URL Input */}
+      {maskMode === 'url' && (
+        <div className="mb-4">
+          <input
+            type="text"
+            className="w-full p-2 border border-soft-gray rounded-lg"
+            placeholder="Paste mask image URL (must be accessible from server)"
+            value={maskUrl}
+            onChange={e => setMaskUrl(e.target.value)}
+          />
+          <div className="text-xs text-charcoal-gray/60 mt-1">
+            The mask URL must be a direct link to a PNG/JPG image accessible by the backend server.
+          </div>
+        </div>
+      )}
+
       {/* Canvas Area */}
       <div className="relative rounded-md overflow-hidden w-full">
         <div
@@ -445,7 +468,7 @@ const MaskEditor = ({ imageUrl, onMaskChange }) => {
               <div className="text-sm text-gray-500">Supported: PNG, JPG, 512x512+ recommended</div>
             </div>
           )}
-          {image && (
+          {image && maskMode === 'draw' && (
             <Stage
               width={stageSize.width}
               height={stageSize.height}
@@ -469,6 +492,14 @@ const MaskEditor = ({ imageUrl, onMaskChange }) => {
                 {renderedLines}
               </Layer>
             </Stage>
+          )}
+          {image && maskMode === 'url' && maskUrl && (
+            <img
+              src={maskUrl}
+              alt="Mask preview"
+              className="absolute top-0 left-0 w-full h-full object-contain opacity-80 pointer-events-none border-2 border-blue-300"
+              style={{ zIndex: 10 }}
+            />
           )}
         </div>
         

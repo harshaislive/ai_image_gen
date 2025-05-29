@@ -78,6 +78,7 @@ const ImageSettings = ({ settings, onChange }) => {
               <option value="gpt-image-1">GPT Image 1</option>
               <option value="dall-e-3">DALL-E 3</option>
               <option value="dall-e-2">DALL-E 2</option>
+              <option value="ideogram">Ideogram (Replicate)</option>
             </select>
           </div>
 

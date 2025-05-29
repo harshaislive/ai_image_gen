@@ -1,7 +1,9 @@
 import express from 'express';
+import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import axios from 'axios';
+import Replicate from 'replicate';
 import fs from 'fs';
 import path from 'path';
 import { dirname } from 'path';
@@ -18,14 +20,39 @@ app.use(express.json({ limit: '50mb' })); // Increased limit for larger images
 
 const PORT = process.env.PORT || 5000;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const REPLICATE_API_TOKEN = process.env.REPLICATE_API_TOKEN;
 
 if (!OPENAI_API_KEY) {
   console.error('Missing OPENAI_API_KEY in .env');
   process.exit(1);
 }
 
-// Create tmp directory if it doesn't exist
-fs.mkdirSync(path.join(__dirname, 'tmp'), { recursive: true });
+// Create temporary file storage
+const tmpDir = path.join(__dirname, 'tmp');
+if (!fs.existsSync(tmpDir)) {
+  fs.mkdirSync(tmpDir);
+}
+
+// Serve static files from the tmp directory
+app.use('/tmp', express.static(tmpDir));
+
+// Helper function to save base64 data to a file and return a URL
+const saveBase64ToFile = async (base64Data, filePrefix) => {
+  // Remove the data URL prefix if present
+  const base64Content = base64Data.includes('base64,') 
+    ? base64Data.split('base64,')[1] 
+    : base64Data;
+  
+  // Generate a unique filename
+  const filename = `${filePrefix}_${Date.now()}.png`;
+  const filepath = path.join(tmpDir, filename);
+  
+  // Save the file
+  await fs.promises.writeFile(filepath, Buffer.from(base64Content, 'base64'));
+  
+  // Return the URL (relative to the server)
+  return `/tmp/${filename}`;
+};
 
 // Text-to-Image Endpoint
 app.post('/api/generate', async (req, res) => {
@@ -323,6 +350,140 @@ process.on('unhandledRejection', (err) => {
   console.error('UNHANDLED REJECTION! 💥');
   console.error(err);
   console.log('Server continuing to run despite unhandled promise rejection');
+});
+
+// --- Replicate Ideogram Test Endpoint ---
+app.get('/api/replicate/ideogram/test', (req, res) => {
+  if (REPLICATE_API_TOKEN) {
+    res.json({ status: 'ok', message: 'Replicate API token loaded.' });
+  } else {
+    res.status(500).json({ status: 'error', message: 'REPLICATE_API_TOKEN is missing.' });
+  }
+});
+
+// --- Replicate Ideogram Endpoint ---
+app.post('/api/replicate/ideogram', async (req, res) => {
+  try {
+    if (!REPLICATE_API_TOKEN) {
+      return res.status(500).json({ error: 'Missing REPLICATE_API_TOKEN in .env' });
+    }
+    const replicate = new Replicate({ auth: REPLICATE_API_TOKEN });
+    const {
+      prompt,
+      negative_prompt,
+      image,
+      mask,
+      aspect_ratio,
+      resolution,
+      magic_prompt_option,
+      style_type,
+      seed
+    } = req.body;
+
+    // Validate prompt
+    if (!prompt || typeof prompt !== 'string' || prompt.trim() === '') {
+      return res.status(400).json({ error: 'Prompt is required and must be a non-empty string.' });
+    }
+
+    // Enum values from schema
+    const allowedAspectRatios = [
+      "1:1","16:9","9:16","4:3","3:4","3:2","2:3","16:10","10:16","3:1","1:3"
+    ];
+    const allowedResolutions = [
+      "None","512x1536","576x1408","576x1472","576x1536","640x1344","640x1408","640x1472","640x1536","704x1152","704x1216","704x1280","704x1344","704x1408","704x1472","736x1312","768x1088","768x1216","768x1280","768x1344","832x960","832x1024","832x1088","832x1152","832x1216","832x1248","864x1152","896x960","896x1024","896x1088","896x1120","896x1152","960x832","960x896","960x1024","960x1088","1024x832","1024x896","1024x960","1024x1024","1088x768","1088x832","1088x896","1088x960","1120x896","1152x704","1152x832","1152x864","1152x896","1216x704","1216x768","1216x832","1248x832","1280x704","1280x768","1280x800","1312x736","1344x640","1344x704","1344x768","1408x576","1408x640","1408x704","1472x576","1472x640","1472x704","1536x512","1536x576","1536x640"
+    ];
+    const allowedStyleTypes = ["None","Auto","General","Realistic","Design","Render 3D","Anime"];
+    const allowedMagicPromptOptions = ["Auto","On","Off"];
+
+    // Validate and build input object for Replicate
+    const input = { prompt };
+    if (typeof negative_prompt === 'string' && negative_prompt.trim() !== '') input.negative_prompt = negative_prompt;
+    
+    // Process image if it exists
+    if (typeof image === 'string' && image.trim() !== '') {
+      // If it's a URL, use it directly
+      if (image.startsWith('http')) {
+        input.image = image;
+        console.log('Using external image URL');
+      } else {
+        // For base64, save to file and use URL for consistency with mask handling
+        if (image.startsWith('data:') || !image.startsWith('http')) {
+          // Save the image to a file and get a URL
+          const imageUrl = await saveBase64ToFile(image, 'image');
+          // Convert to absolute URL with hostname
+          const serverUrl = `http://localhost:${PORT}`;
+          input.image = `${serverUrl}${imageUrl}`;
+          console.log('Saved image to file and using URL:', input.image);
+        }
+      }
+    }
+    
+    // Process mask if it exists
+    if (typeof mask === 'string' && mask.trim() !== '') {
+      // If it's a URL, use it directly
+      if (mask.startsWith('http')) {
+        input.mask = mask;
+        console.log('Using external mask URL');
+      } else {
+        // For base64, save to file and use URL (Replicate requires URI format for mask)
+        if (mask.startsWith('data:') || !mask.startsWith('http')) {
+          // Save the mask to a file and get a URL
+          const maskUrl = await saveBase64ToFile(mask, 'mask');
+          // Convert to absolute URL with hostname
+          const serverUrl = `http://localhost:${PORT}`;
+          input.mask = `${serverUrl}${maskUrl}`;
+          console.log('Saved mask to file and using URL:', input.mask);
+        }
+      }
+    }
+    
+    if (typeof aspect_ratio === 'string' && allowedAspectRatios.includes(aspect_ratio)) input.aspect_ratio = aspect_ratio;
+    if (typeof resolution === 'string' && allowedResolutions.includes(resolution)) input.resolution = resolution;
+    if (typeof magic_prompt_option === 'string' && allowedMagicPromptOptions.includes(magic_prompt_option)) input.magic_prompt_option = magic_prompt_option;
+    if (typeof style_type === 'string' && allowedStyleTypes.includes(style_type)) input.style_type = style_type;
+    if (typeof seed === 'number' && !isNaN(seed)) input.seed = seed;
+
+    // Call Replicate API with retry logic
+    const MAX_RETRIES = 3;
+    let retryCount = 0;
+    let output;
+    
+    while (retryCount < MAX_RETRIES) {
+      try {
+        console.log(`Replicate API attempt ${retryCount + 1} of ${MAX_RETRIES}...`);
+        output = await replicate.run(
+          "ideogram-ai/ideogram-v2-turbo",
+          { input }
+        );
+        // Success! Break out of retry loop
+        break;
+      } catch (retryError) {
+        retryCount++;
+        // Only retry on specific error codes (PA = Prediction interrupted)
+        if (retryCount < MAX_RETRIES && retryError.message && retryError.message.includes('code: PA')) {
+          console.log(`Replicate API interrupted (code: PA), retrying... (${retryCount}/${MAX_RETRIES})`);
+          // Wait a bit before retrying (exponential backoff)
+          await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+        } else {
+          // If we've exhausted retries or it's not a retryable error, rethrow
+          throw retryError;
+        }
+      }
+    }
+    
+    // Normalize output to always be an array
+    if (typeof output === 'string') output = [output];
+    if (!Array.isArray(output)) output = [];
+    return res.json({ output });
+  } catch (err) {
+    // Log full error details
+    if (err && err.response && err.response.data) {
+      console.error('[REPLICATE ERROR]', err.response.data);
+      return res.status(500).json({ error: err.response.data.error || JSON.stringify(err.response.data) });
+    }
+    console.error('[REPLICATE ERROR]', err);
+    return res.status(500).json({ error: err.message || 'Replicate API error' });
+  }
 });
 
 app.listen(PORT, '0.0.0.0', () => {

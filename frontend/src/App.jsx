@@ -2,7 +2,10 @@ import React, { useState, useMemo, useEffect } from 'react';
 import axios from 'axios';
 import MaskEditor from './components/MaskEditor';
 import ImageSettings from './components/ImageSettings';
+import ImageInput from './components/ImageInput';
 import FlowiseChatbot from './components/FlowiseChatbot';
+
+// Removed top-level readFileAsDataURL - will define it locally where needed
 
 const DEFAULT_SETTINGS = {
   model: 'gpt-image-1',
@@ -43,17 +46,17 @@ function Footer({ model }) {
 }
 
 // --- GenerateButton Component ---
-function GenerateButton({ loading, prompt, file, tab, handleGenerate, timer }) {
+function GenerateButton({ loading, prompt, file, imageUrl, tab, handleGenerate, timer }) {
   return (
     <button
       type="button"
       className={`w-full py-4 rounded-xl font-semibold text-lg transition-all duration-200 ${
-        loading || !prompt || (tab === 'image' && !file)
+        loading || !prompt || (tab === 'image' && !file && !imageUrl)
           ? 'bg-soft-gray text-gray-400 cursor-not-allowed'
           : 'bg-gradient-to-r from-deep-blue to-dark-blue text-white hover:from-dark-blue hover:to-deep-blue shadow-lg hover:shadow-xl transform hover:-translate-y-0.5'
       } font-sans`}
       onClick={handleGenerate}
-      disabled={loading || !prompt || (tab === 'image' && !file)}
+      disabled={loading || !prompt || (tab === 'image' && !file && !imageUrl)}
     >
       {loading ? (
         <div className="flex items-center justify-center gap-3">
@@ -86,6 +89,7 @@ export default function App() {
   const [prompt, setPrompt] = useState('');
   const [image, setImage] = useState(null);
   const [file, setFile] = useState(null);
+  const [imageUrl, setImageUrl] = useState(null); // For image URLs
   const [originalFile, setOriginalFile] = useState(null);
   const [mask, setMask] = useState(null);
   const [result, setResult] = useState(null);
@@ -141,67 +145,194 @@ const handleGenerate = async () => {
 
   // --- Main Generation/Editing Logic ---
   const proceedGenerate = async () => {
-    // Prevent multiple rapid calls
-    if (loading) {
-      console.log('Already processing, ignoring additional clicks');
-      return;
-    }
-    
-    setError('');
     setLoading(true);
+    setError('');
     setResult(null);
-    setTimer(0);
-    if (timerIntervalId) clearInterval(timerIntervalId);
-    const intervalId = setInterval(() => setTimer(prevTimer => prevTimer + 1), 1000);
+
+    // Start timer
+    let seconds = 0;
+    const intervalId = setInterval(() => {
+      seconds += 1;
+      setTimer(seconds);
+    }, 1000);
     setTimerIntervalId(intervalId);
-    
+
     try {
-      if (tab === 'text') {
-        const backendUrl = import.meta.env.VITE_BACKEND_URL || '';
-const res = await axios.post(`${backendUrl}/api/generate`, { prompt, ...settings });
-        setResult(res.data.image);
-        setLoading(false);
-        if (timerIntervalId) clearInterval(timerIntervalId);
-        setTimerIntervalId(null);
-      } else {
-        if (!originalFile) {
-          setError('Please upload an image.');
-          setLoading(false);
-          if (timerIntervalId) clearInterval(timerIntervalId);
-          setTimerIntervalId(null);
-          return;
-        }
-        
-        // Use a Promise to handle the FileReader asynchronously
-        const readFileAsDataURL = (file) => {
-          return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result);
-            reader.onerror = reject;
-            reader.readAsDataURL(file);
-          });
-        };
-        
+      // Simple utility function to read file as data URL
+      function readFileAsDataURL(file) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+      }
+
+      if (settings.model === 'ideogram') {
+        // Use Replicate Ideogram endpoint
         try {
-          // Wait for the file to be read
-          const base64 = await readFileAsDataURL(file);
-          const body = { prompt, image: base64, ...settings };
-          if (mask) body.mask = mask;
+          // Build basic request body
+          const reqBody = { prompt };
           
-          console.log('Sending edit request to backend...');
-          const backendUrl = import.meta.env.VITE_BACKEND_URL || '';
-const res = await axios.post(`${backendUrl}/api/edit`, body);
-          console.log('Received response from backend');
-          setResult(res.data.image);
+          // Handle text-to-image vs image-to-image modes
+          if (tab === 'text') {
+            // Text-to-image: Just use the prompt
+            console.log('Ideogram text-to-image mode');
+          } else if (tab === 'image') {
+            // Image-to-image: Need both image and mask
+            console.log('Ideogram image-to-image mode');
+            console.log('- File present:', !!file);
+            console.log('- Image URL present:', !!imageUrl);
+            console.log('- Mask present:', !!mask);
+            
+            // Check if we have either a file or URL
+            if (!file && !imageUrl) {
+              setError('Please provide an image (upload or URL) for Ideogram inpainting.');
+              setLoading(false);
+              if (timerIntervalId) clearInterval(timerIntervalId);
+              setTimerIntervalId(null);
+              setTimer(0);
+              return;
+            }
+            
+            // Create placeholder mask if none exists
+            if (!mask) {
+              console.log('No mask detected, creating a simple placeholder mask');
+              // Create a simple placeholder mask
+              const canvas = document.createElement('canvas');
+              const ctx = canvas.getContext('2d');
+              
+              // Set canvas dimensions
+              canvas.width = 512;
+              canvas.height = 512;
+              
+              // Create a simple mask (white background with black circle in center)
+              ctx.fillStyle = 'white';
+              ctx.fillRect(0, 0, canvas.width, canvas.height);
+              ctx.fillStyle = 'black';
+              ctx.beginPath();
+              ctx.arc(canvas.width/2, canvas.height/2, 100, 0, Math.PI * 2);
+              ctx.fill();
+              
+              // Convert to data URL
+              const placeholderMask = canvas.toDataURL('image/png');
+              console.log('Created placeholder mask with length:', placeholderMask.length);
+              reqBody.mask = placeholderMask;
+            } else {
+              reqBody.mask = mask;
+            }
+            
+            // Set the image (either from file or URL)
+            if (file) {
+              // Convert file to data URL
+              const imageDataUrl = await readFileAsDataURL(file);
+              reqBody.image = imageDataUrl;
+              console.log('- Image data URL length:', imageDataUrl?.length || 0);
+            } else if (imageUrl) {
+              // Use the URL directly
+              reqBody.image = imageUrl;
+              console.log('- Using image URL:', imageUrl);
+            }
+            
+            console.log('- Mask data URL length:', reqBody.mask?.length || 0);
+          }
+          
+          // Add optional parameters if present
+          if (settings.negative_prompt) reqBody.negative_prompt = settings.negative_prompt;
+          if (settings.aspect_ratio) reqBody.aspect_ratio = settings.aspect_ratio;
+          if (settings.resolution && settings.resolution !== 'None') reqBody.resolution = settings.resolution;
+          if (settings.magic_prompt_option) reqBody.magic_prompt_option = settings.magic_prompt_option;
+          if (settings.style_type && settings.style_type !== 'None') reqBody.style_type = settings.style_type;
+          if (typeof settings.seed === 'number') reqBody.seed = settings.seed;
+          
+          // Remove any undefined/null/empty values
+          Object.keys(reqBody).forEach(key => {
+            if (reqBody[key] === undefined || reqBody[key] === null || reqBody[key] === '') {
+              delete reqBody[key];
+            }
+          });
+          
+          console.log('Sending request to Replicate with:', Object.keys(reqBody));
+          
+          const response = await axios.post(
+            import.meta.env.VITE_BACKEND_URL + '/api/replicate/ideogram',
+            reqBody
+          );
+          
+          // Replicate returns an array of image URLs
+          setResult(response.data.output);
+          console.log('Received result from Replicate:', response.data.output);
         } catch (err) {
-          // Show backend error if available
-          console.error('Error during image edit:', err);
-          setError(err?.response?.data?.error || 'Failed to edit image.');
+          console.error('Error generating image (Replicate):', err);
+          setError(err?.response?.data?.error || 'Failed to generate image (Replicate).');
         } finally {
           setLoading(false);
           if (timerIntervalId) clearInterval(timerIntervalId);
           setTimerIntervalId(null);
           setTimer(0);
+        }
+      } else {
+        // For OpenAI models
+        if (tab === 'text') {
+          // Text-to-image generation
+          try {
+            const response = await axios.post(
+              import.meta.env.VITE_BACKEND_URL + '/api/generate',
+              { prompt, ...settings }
+            );
+            setResult(response.data.url);
+          } catch (err) {
+            console.error('Error generating image:', err);
+            setError(err?.response?.data?.error || 'Failed to generate image.');
+          }
+        } else if (tab === 'image') {
+          // Image editing - need either file or URL
+          if (!file && !imageUrl) {
+            setError('Please provide an image (upload or URL) for editing.');
+            setLoading(false);
+            if (timerIntervalId) clearInterval(timerIntervalId);
+            setTimerIntervalId(null);
+            setTimer(0);
+            return;
+          }
+          
+          // Need either mask or prompt
+          if (!mask && !prompt) {
+            setError('Please draw a mask or enter a prompt to edit the image.');
+            setLoading(false);
+            if (timerIntervalId) clearInterval(timerIntervalId);
+            setTimerIntervalId(null);
+            setTimer(0);
+            return;
+          }
+
+          try {
+            // Prepare the request body
+            const body = { prompt, ...settings };
+            
+            // Add image from file or URL
+            if (file) {
+              console.log('[EDIT] Using uploaded file');
+              const base64 = await readFileAsDataURL(file);
+              body.image = base64;
+            } else if (imageUrl) {
+              console.log('[EDIT] Using image URL:', imageUrl);
+              body.image = imageUrl;
+            }
+            
+            // Add mask if available
+            if (mask) body.mask = mask;
+
+            console.log('[EDIT] Preparing request...');
+            const response = await axios.post(
+              import.meta.env.VITE_BACKEND_URL + '/api/edit',
+              body
+            );
+            setResult(response.data.url);
+          } catch (err) {
+            console.error('Error during image edit:', err);
+            setError(err?.response?.data?.error || 'Failed to edit image.');
+          }
         }
       }
     } catch (err) {
@@ -214,13 +345,32 @@ const res = await axios.post(`${backendUrl}/api/edit`, body);
     }
   };
 
-  const handleFileChange = (e) => {
-    setFile(e.target.files[0]);
-    setOriginalFile(e.target.files[0]);
-    setImage(URL.createObjectURL(e.target.files[0]));
-    setMask(null);
+  // Handle image input changes (file or URL)
+  const handleImageChange = (newFile, newUrl) => {
+    // Reset previous state
     setResult(null);
+    setMask(null);
     setError('');
+    
+    if (newFile) {
+      // Handle file upload
+      setFile(newFile);
+      setOriginalFile(newFile);
+      setImage(URL.createObjectURL(newFile));
+      setImageUrl(null); // Clear URL when file is uploaded
+    } else if (newUrl) {
+      // Handle image URL
+      setImageUrl(newUrl);
+      setFile(null); // Clear file when URL is used
+      setOriginalFile(null);
+      setImage(null); // Don't create object URL for remote images
+    } else {
+      // Reset everything if both are null
+      setFile(null);
+      setOriginalFile(null);
+      setImage(null);
+      setImageUrl(null);
+    }
   };
 
   // --- Utility: Download Image ---
@@ -233,7 +383,7 @@ const res = await axios.post(`${backendUrl}/api/edit`, body);
     document.body.removeChild(link);
   };
 
-// --- Main Render ---
+  // --- Main Render ---
   return (
     <div className="min-h-screen font-sans bg-off-white bg-[url('/brand-bg.jpg')] bg-cover bg-center bg-no-repeat flex flex-col items-center justify-center py-8">
       <FlowiseChatbot />
@@ -333,18 +483,16 @@ const res = await axios.post(`${backendUrl}/api/edit`, body);
             {/* IMAGE TO IMAGE TAB */}
             {tab === 'image' && (
               <div className="space-y-6">
-                {/* Upload Area */}
+                {/* Image Input Component */}
                 <div className="space-y-4">
-                  <label className="block text-charcoal-gray font-medium mb-2 font-sans">Upload Image</label>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleFileChange}
-                    className="block w-full text-sm text-charcoal-gray file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-warm-yellow file:text-rich-red hover:file:bg-warm-yellow/80 file:cursor-pointer cursor-pointer font-sans"
+                  <label className="block text-charcoal-gray font-medium mb-2 font-sans">Upload Image or Enter URL</label>
+                  <ImageInput 
+                    onImageChange={handleImageChange}
+                    currentImage={file}
                   />
                 </div>
-                {/* If no file uploaded, show upload prompt */}
-                {!file && (
+                {/* If no image (file or URL) is provided, show upload prompt */}
+                {!file && !imageUrl && (
                   <div className="border-2 border-dashed border-soft-gray rounded-xl p-8 text-center">
                     <div className="w-16 h-16 bg-soft-gray/30 rounded-full flex items-center justify-center mx-auto mb-4">
                       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8 text-charcoal-gray">
@@ -368,8 +516,8 @@ const res = await axios.post(`${backendUrl}/api/edit`, body);
                     </div>
                   </div>
                 )}
-                {/* If file uploaded, show mask editor and preview */}
-                {file && (
+                {/* If image (file or URL) is provided, show mask editor and preview */}
+                {(file || imageUrl) && (
                   <div className="space-y-6">
                     {/* Mask Editor Section */}
                     <div className="space-y-4">
@@ -381,6 +529,7 @@ const res = await axios.post(`${backendUrl}/api/edit`, body);
                             setFile(null);
                             setOriginalFile(null);
                             setImage(null);
+                            setImageUrl(null);
                             setMask(null);
                             setResult(null);
                           }}
@@ -400,7 +549,7 @@ const res = await axios.post(`${backendUrl}/api/edit`, body);
                           <h4 className="text-sm font-medium text-charcoal-gray">Original Image</h4>
                           <div className="relative rounded-xl overflow-hidden border border-soft-gray bg-off-white">
                             <img
-                              src={URL.createObjectURL(file)}
+                              src={file ? URL.createObjectURL(file) : imageUrl}
                               alt="Original image"
                               className="w-full h-auto object-contain max-h-[400px]"
                             />
@@ -409,7 +558,7 @@ const res = await axios.post(`${backendUrl}/api/edit`, body);
                         {/* Mask Editor */}
                         <div className="space-y-2">
                           <h4 className="text-sm font-medium text-charcoal-gray">Draw Your Mask</h4>
-                          <MaskEditor imageUrl={imageObjectUrl} onMaskChange={setMask} />
+                          <MaskEditor imageUrl={file ? imageObjectUrl : imageUrl} onMaskChange={setMask} />
                         </div>
                       </div>
                     </div>
@@ -456,7 +605,7 @@ const res = await axios.post(`${backendUrl}/api/edit`, body);
                             className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors duration-200 text-sm"
                           >
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a2.25 2.25 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
                             </svg>
                             Edit This Result
                           </button>
@@ -516,22 +665,36 @@ const res = await axios.post(`${backendUrl}/api/edit`, body);
               loading={loading}
               prompt={prompt}
               file={file}
+              imageUrl={imageUrl}
               tab={tab}
               handleGenerate={handleGenerate}
               timer={timer}
             />
-            {(tab === 'image' && !file && !loading) && (
+            {(tab === 'image' && !file && !imageUrl && !loading) && (
               <p className="text-xs text-center text-charcoal-gray/60 mt-2">
-                Upload an image above to enable AI editing
+                Upload an image or enter a URL above to enable AI editing
               </p>
             )}
-            {(tab === 'image' && file && !mask && !loading) && (
+            {(tab === 'image' && (file || imageUrl) && !mask && !loading) && (
               <p className="text-xs text-center text-orange-600 mt-2 flex items-center justify-center gap-1">
                 <span>⚠️</span>
                 <span>Draw a mask on your image to specify edit areas</span>
               </p>
             )}
             <ErrorDisplay error={error} />
+            {/* --- Replicate Result Display --- */}
+            {Array.isArray(result) && settings.model === 'ideogram' && result.length > 0 && (
+              <div className="mt-4 space-y-4">
+                <div className="font-sans font-medium text-charcoal-gray mb-2">Ideogram Results:</div>
+                <div className="grid grid-cols-1 gap-4">
+                  {result.map((imgUrl, idx) => (
+                    <div key={idx} className="rounded-xl overflow-hidden border border-soft-gray bg-white">
+                      <img src={imgUrl} alt={`Ideogram result ${idx + 1}`} className="w-full h-auto object-contain" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
         <Footer model={settings.model} />

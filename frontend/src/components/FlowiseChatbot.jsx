@@ -1,17 +1,23 @@
-import { useEffect } from "react";
+import { useRef, useState } from "react";
 
 export default function FlowiseChatbot() {
-  useEffect(() => {
-    const script = document.createElement("script");
-    script.type = "module";
-    script.innerHTML = `
-      import Chatbot from "https://cdn.jsdelivr.net/npm/flowise-embed/dist/web.js";
-      Chatbot.init({
-        chatflowid: "12025a0e-8c9b-473c-9e37-08f6a6bbbf17",
-        apiHost: "https://flowiseaiflowise-production-431d.up.railway.app",
-        chatflowConfig: {},
-        observersConfig: {},
-        theme: ${JSON.stringify({
+  const [open, setOpen] = useState(false);
+  const scriptLoaded = useRef(false);
+
+  const handleOpen = () => {
+    setOpen(true);
+    // Only inject script once
+    if (!scriptLoaded.current) {
+      const script = document.createElement("script");
+      script.type = "module";
+      script.innerHTML = `
+        import Chatbot from "https://cdn.jsdelivr.net/npm/flowise-embed/dist/web.js";
+        Chatbot.init({
+          chatflowid: "12025a0e-8c9b-473c-9e37-08f6a6bbbf17",
+          apiHost: "https://flowiseaiflowise-production-431d.up.railway.app",
+          chatflowConfig: {},
+          observersConfig: {},
+          theme: ${JSON.stringify({
           fontFamily: "'ABC Arizona Sans', 'ABC Arizona Flare Regular', Arial, sans-serif",
           button: {
             backgroundColor: '#344736',
@@ -22,8 +28,8 @@ export default function FlowiseChatbot() {
             dragAndDrop: true,
             customIconSrc: '/chat_icon.jpg',
             autoWindowOpen: {
-              autoOpen: true,
-              openDelay: 2,
+              autoOpen: false,
+              openDelay: 0,
               autoOpenOnMobile: false
             }
           },
@@ -77,6 +83,11 @@ export default function FlowiseChatbot() {
     background: #b0ddf1 !important;
     color: #342e29 !important;
   }
+  .flowise-chatbot-window {
+    max-height: 80vh !important;
+    overflow-y: auto !important;
+    margin-top: 24px !important;
+  }
   .flowise-chatbot-message.user {
     background: #ffc083 !important;
     color: #342e29 !important;
@@ -84,6 +95,9 @@ export default function FlowiseChatbot() {
   .flowise-chatbot-title {
     color: #342e29 !important;
     background: #fdfbf7 !important;
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 10 !important;
   }
   .flowise-chatbot-message a {
     color: #002140 !important;
@@ -102,8 +116,9 @@ export default function FlowiseChatbot() {
             errorMessage: 'This is a custom error message',
             
             backgroundImage: '',
-            height: 700,
-            width: 400,
+            height: 400, // smaller height
+            width: 320,
+            maxHeight: '80vh', // responsive max height
             fontSize: 16,
             starterPrompts: [
               "What is a bot?",
@@ -156,9 +171,40 @@ export default function FlowiseChatbot() {
       });
     `;
     document.body.appendChild(script);
-    return () => {
-      document.body.removeChild(script);
-    };
-  }, []);
-  return null;
+    scriptLoaded.current = true;
+  }
+};
+
+  // Hide chatbot if not open (Flowise opens window via script)
+  // Show chat button if not open
+  return (
+    <>
+      {!open && (
+        <button
+          onClick={handleOpen}
+          style={{
+            position: 'fixed',
+            bottom: 24,
+            right: 24,
+            zIndex: 1000,
+            background: '#344736',
+            color: '#fff',
+            borderRadius: '50%',
+            width: 56,
+            height: 56,
+            boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
+            border: 'none',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: 28,
+            cursor: 'pointer',
+          }}
+          aria-label="Open chatbot"
+        >
+          💬
+        </button>
+      )}
+    </>
+  );
 }
