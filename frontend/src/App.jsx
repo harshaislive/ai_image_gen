@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import axios from 'axios';
 import MaskEditor from './components/MaskEditor';
 import ImageSettings from './components/ImageSettings';
@@ -81,6 +81,7 @@ function GenerateButton({ loading, prompt, file, tab, handleGenerate, timer }) {
 
 // --- Main App Component ---
 export default function App() {
+  // All state declarations first
   const [tab, setTab] = useState('text'); // 'text', 'image', 'mask'
   const [prompt, setPrompt] = useState('');
   const [image, setImage] = useState(null);
@@ -93,6 +94,21 @@ export default function App() {
   const [timerIntervalId, setTimerIntervalId] = useState(null);
   const [error, setError] = useState('');
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+
+  // Memoize object URL for the uploaded image
+  const imageObjectUrl = useMemo(() => {
+    if (!file) return null;
+    return URL.createObjectURL(file);
+  }, [file]);
+
+  // Cleanup object URL when file changes or component unmounts
+  useEffect(() => {
+    return () => {
+      if (imageObjectUrl) {
+        URL.revokeObjectURL(imageObjectUrl);
+      }
+    };
+  }, [imageObjectUrl]);
 
   const handleGenerate = async () => {
     // For image-to-image: log and validate dimensions before sending
@@ -412,7 +428,7 @@ export default function App() {
                         {/* Mask Editor */}
                         <div className="space-y-2">
                           <h4 className="text-sm font-medium text-charcoal-gray">Draw Your Mask</h4>
-                          <MaskEditor imageUrl={URL.createObjectURL(file)} onMaskChange={setMask} />
+                          <MaskEditor imageUrl={imageObjectUrl} onMaskChange={setMask} />
                         </div>
                       </div>
                     </div>

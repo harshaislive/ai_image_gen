@@ -4,10 +4,12 @@
   "private": true,
   "scripts": {
     "dev": "vite",
+    "start": "vite",
     "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
+    "ai_image_generator_root": "file:..",
     "axios": "^1.6.7",
     "konva": "^9.3.20",
     "react": "^18.2.0",

@@ -106,11 +106,20 @@ app.post('/api/edit', async (req, res) => {
   
   try {
     // Prepare image and mask files for OpenAI API (multipart/form-data)
-    // Decode base64 to buffer
-    const imageBuffer = Buffer.from(image.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, ''), 'base64');
-    let maskBuffer = null;
-    if (mask) {
-      maskBuffer = Buffer.from(mask.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, ''), 'base64');
+    // Robustly decode base64 data URL to buffer for any image type
+    function dataUrlToBuffer(dataUrl) {
+      const matches = dataUrl.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
+      if (!matches) {
+        throw new Error('Invalid image data: not a valid base64 image data URL');
+      }
+      return Buffer.from(matches[2], 'base64');
+    }
+    let imageBuffer, maskBuffer = null;
+    try {
+      imageBuffer = dataUrlToBuffer(image);
+      if (mask) maskBuffer = dataUrlToBuffer(mask);
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
     }
     // --- Dimension validation using sharp ---
     const sharp = (await import('sharp')).default;

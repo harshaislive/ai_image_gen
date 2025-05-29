@@ -8,32 +8,22 @@ A minimalist, Replicate-style app for OpenAI text-to-image and image-to-image ge
 - Minimalist, modern UI (React + Tailwind CSS).
 - Backend proxy for OpenAI API (API key never exposed).
 
-## Setup
+## Setup (Monorepo)
 
-### Backend
 1. Copy `backend/.env.example` to `backend/.env` and add your OpenAI API key.
-2. Install dependencies:
+2. Install all dependencies for both backend and frontend:
    ```sh
-   cd backend
-   npm install
+   npm run install-all
    ```
-3. Start the backend:
-   ```sh
-   npm run dev
-   ```
-
-### Frontend
-1. Install dependencies:
-   ```sh
-   cd frontend
-   npm install
-   ```
-2. Start the frontend:
+3. Start both backend and frontend together:
    ```sh
    npm run dev
    ```
 
-The app will be available at `http://localhost:5173` (frontend) and `http://localhost:5000` (backend).
+- The frontend will be available at `http://localhost:5173` (or your configured port).
+- The backend will be available at `http://localhost:5000` (or your configured port).
+
+You can still run each part individually from their own folders if needed.
 
 ## Notes
 - The backend proxies all OpenAI requests; your API key is never sent to the frontend.
