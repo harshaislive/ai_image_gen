@@ -142,7 +142,25 @@ app.post('/api/edit', async (req, res) => {
     const imgPath = path.join(__dirname, 'tmp', `img_${timestamp}.png`);
     const maskPath = mask ? path.join(__dirname, 'tmp', `mask_${timestamp}.png`) : null;
     fs.writeFileSync(imgPath, imageBuffer);
-    if (mask && maskBuffer) fs.writeFileSync(maskPath, maskBuffer);
+    if (mask && maskBuffer) {
+      // Convert mask to RGBA with alpha channel encoding mask shape
+      const sharp = (await import('sharp')).default;
+      const maskSharp = sharp(maskBuffer).ensureAlpha();
+      const { data, info } = await maskSharp.raw().toBuffer({ resolveWithObject: true });
+      // Create a new buffer for RGBA where alpha = mask (white=255, black=0)
+      const rgba = Buffer.alloc(info.width * info.height * 4);
+      for (let i = 0; i < info.width * info.height; i++) {
+        // Use the grayscale value as alpha, set RGB=0
+        const value = data[i];
+        rgba[i * 4 + 0] = 0; // R
+        rgba[i * 4 + 1] = 0; // G
+        rgba[i * 4 + 2] = 0; // B
+        rgba[i * 4 + 3] = value; // Alpha
+      }
+      await sharp(rgba, { raw: { width: info.width, height: info.height, channels: 4 } })
+        .png()
+        .toFile(maskPath);
+    }
 
     // Prepare form data
     const FormData = (await import('form-data')).default;

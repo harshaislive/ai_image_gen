@@ -242,6 +242,25 @@ const MaskEditor = ({ imageUrl, onMaskChange }) => {
         context.stroke();
       });
 
+      // Binarize the mask to ensure only black and white pixels
+      const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imageData.data;
+      for (let i = 0; i < data.length; i += 4) {
+        // If any channel is not black, set it to white, else keep black
+        const isMasked = data[i] > 127 || data[i+1] > 127 || data[i+2] > 127;
+        if (isMasked) {
+          data[i] = 255;
+          data[i+1] = 255;
+          data[i+2] = 255;
+          data[i+3] = 255;
+        } else {
+          data[i] = 0;
+          data[i+1] = 0;
+          data[i+2] = 0;
+          data[i+3] = 255;
+        }
+      }
+      context.putImageData(imageData, 0, 0);
       // Convert to base64 and send to parent
       const maskDataUrl = canvas.toDataURL('image/png');
       onMaskChange(maskDataUrl);
