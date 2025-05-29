@@ -85,26 +85,61 @@ app.post('/api/generate', async (req, res) => {
   }
 });
 
-// Image-to-Image + Masking Endpoint
-
-app.post('/api/edit', async (req, res) => {
-  const { 
-    prompt, 
-    image, 
-    mask,
-    model = 'gpt-image-1',
-    n = 1,
-    size = '1024x1024',
-    quality = 'high',
-    background = 'auto',
-    format = 'png',
-    output_compression = 100,
-    moderation = 'auto'
-  } = req.body;
-  
-  if (!prompt || !image) return res.status(400).json({ error: 'Prompt and image required.' });
-  
+// Add a test route to verify OpenAI API key
+app.get('/api/test-openai', async (req, res) => {
   try {
+    console.log('[TEST] Testing OpenAI API key');
+    if (!OPENAI_API_KEY) {
+      return res.status(500).json({ error: 'OpenAI API key is missing' });
+    }
+    
+    // Make a simple request to OpenAI to test the key
+    try {
+      const response = await axios.get('https://api.openai.com/v1/models', {
+        headers: { Authorization: `Bearer ${OPENAI_API_KEY}` }
+      });
+      return res.json({ success: true, message: 'OpenAI API key is valid', models: response.data.data.slice(0, 5) });
+    } catch (err) {
+      console.error('[TEST] OpenAI API key test failed:', err.message);
+      return res.status(401).json({ error: 'OpenAI API key is invalid or expired', details: err.message });
+    }
+  } catch (err) {
+    console.error('[TEST] Error testing OpenAI API key:', err);
+    return res.status(500).json({ error: 'Error testing OpenAI API key' });
+  }
+});
+
+// Image-to-Image + Masking Endpoint
+app.post('/api/edit', async (req, res) => {
+  try {
+    console.log('[EDIT] Incoming request to /api/edit');
+    console.log('Body:', JSON.stringify(req.body).slice(0, 500)); // Log only first 500 chars for brevity
+    
+    // Check API key first
+    if (!OPENAI_API_KEY) {
+      console.error('[ERROR] Missing OpenAI API key');
+      return res.status(500).json({ error: 'Server configuration error: Missing OpenAI API key' });
+    }
+    
+    const { 
+      prompt, 
+      image, 
+      mask,
+      model = 'gpt-image-1',
+      n = 1,
+      size = '1024x1024',
+      quality = 'high',
+      background = 'auto',
+      format = 'png',
+      output_compression = 100,
+      moderation = 'auto'
+    } = req.body;
+    
+    if (!prompt || !image) {
+      console.error('[ERROR] Missing prompt or image in /api/edit');
+      return res.status(400).json({ error: 'Prompt and image required.' });
+    }
+    
     // Prepare image and mask files for OpenAI API (multipart/form-data)
     // Robustly decode base64 data URL to buffer for any image type
     function dataUrlToBuffer(dataUrl) {
@@ -114,27 +149,32 @@ app.post('/api/edit', async (req, res) => {
       }
       return Buffer.from(matches[2], 'base64');
     }
+    
     let imageBuffer, maskBuffer = null;
     try {
       imageBuffer = dataUrlToBuffer(image);
       if (mask) maskBuffer = dataUrlToBuffer(mask);
+      console.log('[EDIT] Successfully decoded image and mask');
     } catch (err) {
+      console.error('[ERROR] Failed to decode image/mask:', err.message);
       return res.status(400).json({ error: err.message });
     }
+    
     // --- Dimension validation using sharp ---
     const sharp = (await import('sharp')).default;
-    let imgMeta = null, maskMeta = null;
+    let imgMeta, maskMeta;
     try {
       imgMeta = await sharp(imageBuffer).metadata();
       if (maskBuffer) maskMeta = await sharp(maskBuffer).metadata();
       console.log('[Validation] Uploaded image size:', imgMeta.width, imgMeta.height);
       if (maskMeta) console.log('[Validation] Uploaded mask size:', maskMeta.width, maskMeta.height);
-      if (maskMeta && (imgMeta.width !== maskMeta.width || imgMeta.height !== maskMeta.height)) {
-        return res.status(400).json({ error: 'Image and mask dimensions do not match!', details: { image: imgMeta, mask: maskMeta } });
+      if (maskBuffer && (imgMeta.width !== maskMeta.width || imgMeta.height !== maskMeta.height)) {
+        console.error('[ERROR] Image and mask must be the same size!');
+        return res.status(400).json({ error: 'Image and mask must be the same size!' });
       }
-    } catch (sharpErr) {
-      console.error('Sharp error:', sharpErr);
-      return res.status(500).json({ error: 'Failed to read image/mask metadata', details: sharpErr.message });
+    } catch (err) {
+      console.error('[ERROR] Failed to validate image/mask dimensions:', err.message);
+      return res.status(400).json({ error: 'Failed to validate image/mask dimensions.' });
     }
     // --- End validation ---
     // Write temp files
@@ -142,6 +182,7 @@ app.post('/api/edit', async (req, res) => {
     const imgPath = path.join(__dirname, 'tmp', `img_${timestamp}.png`);
     const maskPath = mask ? path.join(__dirname, 'tmp', `mask_${timestamp}.png`) : null;
     fs.writeFileSync(imgPath, imageBuffer);
+    
     if (mask && maskBuffer) {
       const sharp = (await import('sharp')).default; // Ensure sharp is available in this scope if not already.
       // Process the mask: ensure it's RGBA, then use its luminance for the new alpha.
@@ -173,14 +214,33 @@ app.post('/api/edit', async (req, res) => {
     }
 
     // Prepare form data
+    console.log('[EDIT] Preparing form data for OpenAI request');
     const FormData = (await import('form-data')).default;
     const form = new FormData();
     
     // Add all parameters
+    console.log('[EDIT] Adding parameters to form');
     form.append('model', model);
     form.append('prompt', prompt);
+    
+    // Check if image file exists
+    if (!fs.existsSync(imgPath)) {
+      console.error('[ERROR] Image file does not exist:', imgPath);
+      return res.status(500).json({ error: 'Image file not found on server' });
+    }
+    
+    console.log('[EDIT] Adding image to form:', imgPath);
     form.append('image', fs.createReadStream(imgPath));
-    if (mask && maskBuffer) form.append('mask', fs.createReadStream(maskPath));
+    
+    if (mask && maskBuffer) {
+      if (!fs.existsSync(maskPath)) {
+        console.error('[ERROR] Mask file does not exist:', maskPath);
+        return res.status(500).json({ error: 'Mask file not found on server' });
+      }
+      console.log('[EDIT] Adding mask to form:', maskPath);
+      form.append('mask', fs.createReadStream(maskPath));
+    }
+    
     form.append('n', n);
     form.append('size', size);
     form.append('quality', quality);
@@ -192,32 +252,77 @@ app.post('/api/edit', async (req, res) => {
     if (format !== 'png' && output_compression !== 100) form.append('output_compression', output_compression);
     if (moderation !== 'auto') form.append('moderation', moderation);
 
-    const response = await axios.post(
-      'https://api.openai.com/v1/images/edits',
-      form,
-      {
-        headers: {
-          ...form.getHeaders(),
-          Authorization: `Bearer ${OPENAI_API_KEY}`
+    try {
+      // Log the API key length (for debugging, don't log the actual key)
+      console.log(`[EDIT] OpenAI API Key length: ${OPENAI_API_KEY.length}, starts with: ${OPENAI_API_KEY.substring(0, 3)}...`);
+      console.log('[EDIT] Sending request to OpenAI /v1/images/edits...');
+      console.log('[EDIT] Request parameters:', {
+        model,
+        prompt: prompt.substring(0, 30) + '...',
+        size,
+        quality,
+        hasImage: !!imgPath,
+        hasMask: !!(mask && maskPath),
+        formHeaders: Object.keys(form.getHeaders())
+      });
+      
+      // Make the API call with a timeout
+      const response = await axios.post(
+        'https://api.openai.com/v1/images/edits',
+        form,
+        {
+          headers: {
+            ...form.getHeaders(),
+            Authorization: `Bearer ${OPENAI_API_KEY}`
+          },
+          timeout: 60000 // 60 second timeout
         }
-      }
-    );
+      );
+      
+      console.log('[EDIT] Received response from OpenAI:', {
+        status: response.status,
+        statusText: response.statusText,
+        hasData: !!response.data,
+        hasImages: !!(response.data && response.data.data && response.data.data.length > 0)
+      });
 
-    // Cleanup temp files
-    fs.unlinkSync(imgPath);
-    if (mask && maskBuffer) fs.unlinkSync(maskPath);
+      // Cleanup temp files
+      fs.unlinkSync(imgPath);
+      if (mask && maskBuffer) fs.unlinkSync(maskPath);
 
-    // Return either URL or base64 data depending on response format
-    const imageData = response.data.data[0];
-    console.log(`[RESULT] Image generated via /api/edit, model: ${model}, format: ${format}, url: ${imageData.url ? imageData.url : '[base64 returned]'}`);
-    res.json({ 
-      image: imageData.url || `data:image/${format};base64,${imageData.b64_json}`,
-      format: format === 'url' ? 'url' : format
-    });
+      // Return either URL or base64 data depending on response format
+      const imageData = response.data.data[0];
+      console.log(`[RESULT] Image generated via /api/edit, model: ${model}, format: ${format}, url: ${imageData.url ? imageData.url : '[base64 returned]'}`);
+      return res.json({ 
+        image: imageData.url || `data:image/${format};base64,${imageData.b64_json}`,
+        format: format === 'url' ? 'url' : format
+      });
+    } catch (err) {
+      // Log and surface OpenAI error
+      console.error('[OpenAI API ERROR]', err.response?.data || err.message);
+      // Attempt to surface OpenAI error message to frontend
+      let openaiMsg = err.response?.data?.error?.message || err.message;
+      return res.status(500).json({ error: `OpenAI API error: ${openaiMsg}` });
+    }
   } catch (err) {
-    console.error('Error editing image:', err.response?.data || err.message);
-    res.status(500).json({ error: 'Failed to edit image.', details: err.response?.data?.error || err.message });
+    // This is a catch-all for any other errors in the main try block
+    console.error('[ERROR] Unexpected error in /api/edit:', err);
+    return res.status(500).json({ error: `Server error: ${err.message || 'Unknown error'}` });
   }
+});
+
+// Global error handler to prevent crashes
+process.on('uncaughtException', (err) => {
+  console.error('UNCAUGHT EXCEPTION! 💥');
+  console.error(err.name, err.message);
+  console.error(err.stack);
+  console.log('Server continuing to run despite uncaught exception');
+});
+
+process.on('unhandledRejection', (err) => {
+  console.error('UNHANDLED REJECTION! 💥');
+  console.error(err);
+  console.log('Server continuing to run despite unhandled promise rejection');
 });
 
 app.listen(PORT, '0.0.0.0', () => {

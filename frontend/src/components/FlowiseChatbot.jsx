@@ -16,13 +16,10 @@ export default function FlowiseChatbot() {
           button: {
             backgroundColor: '#344736',
             iconColor: '#fdfbf7',
-            iconColor: '#fdfbf7',
-            
             right: 20,
             bottom: 20,
             size: 48,
             dragAndDrop: true,
-            iconColor: '#fdfbf7',
             customIconSrc: '/chat_icon.jpg',
             autoWindowOpen: {
               autoOpen: true,
@@ -119,20 +116,12 @@ export default function FlowiseChatbot() {
             botMessage: {
               backgroundColor: '#b0ddf1',
               textColor: '#342e29',
-              backgroundColor: '#b0ddf1',
-              textColor: '#342e29',
-               
-               
               showAvatar: true,
               avatarSrc: '/9922879.png'
             },
             userMessage: {
               backgroundColor: '#ffc083',
               textColor: '#342e29',
-              backgroundColor: '#ffc083',
-              textColor: '#342e29',
-               
-               
               showAvatar: true,
               avatarSrc: 'https://raw.githubusercontent.com/zahidkhawaja/langchain-chat-nextjs/main/public/usericon.png'
             },

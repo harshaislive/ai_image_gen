@@ -110,7 +110,8 @@ export default function App() {
     };
   }, [imageObjectUrl]);
 
-  const handleGenerate = async () => {
+  // --- Generate/Edit Button Handler ---
+const handleGenerate = async () => {
     // For image-to-image: log and validate dimensions before sending
     if (tab === 'image' && file && mask) {
       const img = new window.Image();
@@ -128,6 +129,7 @@ export default function App() {
             setLoading(false);
             return;
           } else {
+            setError(''); // Clear any previous errors
             proceedGenerate();
           }
         };
@@ -137,7 +139,14 @@ export default function App() {
     proceedGenerate();
   };
 
+  // --- Main Generation/Editing Logic ---
   const proceedGenerate = async () => {
+    // Prevent multiple rapid calls
+    if (loading) {
+      console.log('Already processing, ignoring additional clicks');
+      return;
+    }
+    
     setError('');
     setLoading(true);
     setResult(null);
@@ -145,41 +154,63 @@ export default function App() {
     if (timerIntervalId) clearInterval(timerIntervalId);
     const intervalId = setInterval(() => setTimer(prevTimer => prevTimer + 1), 1000);
     setTimerIntervalId(intervalId);
+    
     try {
       if (tab === 'text') {
-        const res = await axios.post('/api/generate', { prompt, ...settings });
+        const backendUrl = import.meta.env.VITE_BACKEND_URL || '';
+const res = await axios.post(`${backendUrl}/api/generate`, { prompt, ...settings });
         setResult(res.data.image);
-      } else {
-        if (!originalFile) throw new Error('Please upload an image.');
-        const reader = new FileReader();
-        reader.onloadend = async () => {
-          try {
-            const base64 = reader.result;
-            const body = { prompt, image: base64, ...settings };
-            if (mask) body.mask = mask;
-            const res = await axios.post('/api/edit', body);
-            setResult(res.data.image);
-          } catch (err) {
-            setError('Failed to edit image.');
-          } finally {
-            setLoading(false);
-            if (timerIntervalId) clearInterval(timerIntervalId);
-            setTimerIntervalId(null);
-            setTimer(0);
-          }
-        };
-        reader.readAsDataURL(file);
-        return;
-      }
-    } catch (err) {
-      setError('Failed to generate image.');
-    } finally {
-      if (tab === 'text') {
         setLoading(false);
         if (timerIntervalId) clearInterval(timerIntervalId);
         setTimerIntervalId(null);
-        setTimer(0);
+      } else {
+        if (!originalFile) {
+          setError('Please upload an image.');
+          setLoading(false);
+          if (timerIntervalId) clearInterval(timerIntervalId);
+          setTimerIntervalId(null);
+          return;
+        }
+        
+        // Use a Promise to handle the FileReader asynchronously
+        const readFileAsDataURL = (file) => {
+          return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+          });
+        };
+        
+        try {
+          // Wait for the file to be read
+          const base64 = await readFileAsDataURL(file);
+          const body = { prompt, image: base64, ...settings };
+          if (mask) body.mask = mask;
+          
+          console.log('Sending edit request to backend...');
+          const backendUrl = import.meta.env.VITE_BACKEND_URL || '';
+const res = await axios.post(`${backendUrl}/api/edit`, body);
+          console.log('Received response from backend');
+          setResult(res.data.image);
+        } catch (err) {
+          // Show backend error if available
+          console.error('Error during image edit:', err);
+          setError(err?.response?.data?.error || 'Failed to edit image.');
+        } finally {
+          setLoading(false);
+          if (timerIntervalId) clearInterval(timerIntervalId);
+          setTimerIntervalId(null);
+          setTimer(0);
+        }
       }
+    } catch (err) {
+      console.error('Error in proceedGenerate:', err);
+      setError(err?.response?.data?.error || 'An unexpected error occurred.');
+      setLoading(false);
+      if (timerIntervalId) clearInterval(timerIntervalId);
+      setTimerIntervalId(null);
+      setTimer(0);
     }
   };
 
