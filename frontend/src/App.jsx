@@ -515,6 +515,7 @@ const handleGenerate = async () => {
                       </div>
                     </div>
                   </div>
+                  </>
                 )}
                 {/* If image (file or URL) is provided, show mask editor and preview */}
                 {(file || imageUrl) && (
