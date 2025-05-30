@@ -118,6 +118,7 @@ const ImageSettings = ({ settings, onChange }) => {
               ) : (
                 // Replicate models
                 <>
+                  <option value="ideogram-ai/ideogram-v2">Ideogram v2</option>
                   <option value="ideogram-ai/ideogram-v2-turbo">Ideogram v2 Turbo</option>
                   <option value="stability-ai/sdxl:39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b">Stable Diffusion XL</option>
                   <option value="stability-ai/sdxl-inpainting:e5a34f7f9060b84b497a8c9cf3f12d43ca0c7875a99e7b301a83d81b5c82cdac">SDXL Inpainting</option>
