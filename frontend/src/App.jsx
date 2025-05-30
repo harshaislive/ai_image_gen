@@ -98,6 +98,17 @@ export default function App() {
   const [timerIntervalId, setTimerIntervalId] = useState(null);
   const [error, setError] = useState('');
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [selectedIdeogramImage, setSelectedIdeogramImage] = useState(null);
+
+  // Effect to update selectedIdeogramImage when result changes for Ideogram model
+  useEffect(() => {
+    if (tab === 'text' && Array.isArray(result) && result.length > 0 && settings.model === 'ideogram') {
+      setSelectedIdeogramImage(result[0]);
+    } else if (!Array.isArray(result) || settings.model !== 'ideogram') {
+      // Clear selection if not Ideogram array result, or if tab changes etc.
+      setSelectedIdeogramImage(null);
+    }
+  }, [result, settings.model, tab]);
 
   // Memoize object URL for the uploaded image
   const imageObjectUrl = useMemo(() => {
@@ -428,10 +439,16 @@ const handleGenerate = async () => {
             {/* TEXT TO IMAGE TAB */}
             {tab === 'text' && (
               <div className="space-y-6">
-                {/* Generated Result Display */}
-                {result && !Array.isArray(result) && settings.model !== 'ideogram' && (
+                {/* Loading State */}
+                {loading && (
+                  <div className="flex justify-center items-center h-64">
+                    <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-deep-blue"></div>
+                  </div>
+                )}
+
+                {/* Single Image Result (OpenAI) */}
+                {!loading && result && typeof result === 'string' && settings.model !== 'ideogram' && (
                   <div className="space-y-4">
-                    <h3 className="text-lg font-medium text-charcoal-gray font-sans">Generated Image</h3>
                     <div className="relative rounded-xl overflow-hidden border border-soft-gray bg-off-white">
                       <img
                         src={result}
@@ -453,8 +470,48 @@ const handleGenerate = async () => {
                     </div>
                   </div>
                 )}
-                {/* Placeholder when no result */}
-                {!result && !loading && (
+
+                {/* Gallery Result (Ideogram) */}
+                {!loading && Array.isArray(result) && settings.model === 'ideogram' && result.length > 0 && (
+                  <div className="space-y-4">
+                    <div className="relative rounded-xl overflow-hidden border border-soft-gray bg-off-white">
+                      <img 
+                        src={selectedIdeogramImage || result[0]} 
+                        alt="Selected Ideogram image" 
+                        className="w-full h-auto object-contain max-h-[480px]" 
+                      />
+                    </div>
+                    {result.length > 1 && (
+                      <div className="flex flex-wrap gap-2 justify-center p-2 bg-soft-gray/20 rounded-lg">
+                        {result.map((imgUrl, idx) => (
+                          <button 
+                            key={idx} 
+                            onClick={() => setSelectedIdeogramImage(imgUrl)} 
+                            className={`w-16 h-16 rounded-md overflow-hidden border-2 ${selectedIdeogramImage === imgUrl ? 'border-deep-blue' : 'border-transparent'} hover:border-deep-blue transition-all duration-150 ease-in-out`}
+                          >
+                            <img src={imgUrl} alt={`Thumbnail ${idx + 1}`} className="w-full h-full object-cover" />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex flex-wrap gap-3 justify-center">
+                      <button
+                        type="button"
+                        onClick={() => downloadImage(selectedIdeogramImage || result[0], 'ideogram-image.png')}
+                        disabled={!(selectedIdeogramImage || (result && result.length > 0 && result[0]))}
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-deep-blue text-white rounded-lg hover:bg-dark-blue transition-colors duration-200 text-sm disabled:bg-gray-300"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                        </svg>
+                        Download Selected
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Placeholder when no result and not loading */}
+                {!loading && !result && (
                   <div className="border-2 border-dashed border-soft-gray rounded-xl p-8 text-center">
                     <div className="w-16 h-16 bg-soft-gray/30 rounded-full flex items-center justify-center mx-auto mb-4">
                       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8 text-charcoal-gray">
@@ -517,64 +574,18 @@ const handleGenerate = async () => {
                   </div>
                   </>
                 )}
-                {/* If image (file or URL) is provided, show mask editor and preview */}
+                {/* If image (file or URL) is provided, show mask editor and preview OR results */}
                 {(file || imageUrl) && (
-                  <div className="space-y-6">
-                    {/* Mask Editor Section */}
-                    <div className="space-y-4">
-                      <div className="flex justify-between items-center">
-                        <h3 className="text-lg font-medium text-charcoal-gray font-sans">Step 2: Draw Your Mask</h3>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setFile(null);
-                            setOriginalFile(null);
-                            setImage(null);
-                            setImageUrl(null);
-                            setMask(null);
-                            setResult(null);
-                          }}
-                          className="text-sm text-deep-blue hover:text-dark-blue transition-colors duration-200 font-sans"
-                        >
-                          Change Image
-                        </button>
-                      </div>
-                      <div className="bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg p-3 border border-purple-100">
-                        <p className="text-sm text-charcoal-gray">
-                          <strong>Instructions:</strong> Draw on the areas you want to edit or change. White areas will be modified by AI, black areas will remain unchanged.
-                        </p>
-                      </div>
-                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        {/* Original Image Preview */}
-                        <div className="space-y-2">
-                          <h4 className="text-sm font-medium text-charcoal-gray">Original Image</h4>
-                          <div className="relative rounded-xl overflow-hidden border border-soft-gray bg-off-white">
-                            <img
-                              src={file ? URL.createObjectURL(file) : imageUrl}
-                              alt="Original image"
-                              className="w-full h-auto object-contain max-h-[400px]"
-                            />
-                          </div>
-                        </div>
-                        {/* Mask Editor */}
-                        <div className="space-y-2">
-                          <h4 className="text-sm font-medium text-charcoal-gray">Draw Your Mask</h4>
-                          <MaskEditor imageUrl={file ? imageObjectUrl : imageUrl} onMaskChange={setMask} />
-                        </div>
-                      </div>
-                    </div>
-                    {/* Generated Result Display */}
-                    {result && !Array.isArray(result) && settings.model !== 'ideogram' && (
+                  <div className="space-y-6"> {/* Main container for this view */}
+                    {result && typeof result === 'string' && settings.model !== 'ideogram' ? (
+                      // START: Result Display UI
                       <div className="space-y-4">
                         <h3 className="text-lg font-medium text-charcoal-gray font-sans">Generated Result</h3>
                         <div className="relative rounded-xl overflow-hidden border border-soft-gray bg-off-white">
-                          <img
-                            src={result}
-                            alt="Generated result"
-                            className="w-full h-auto object-contain max-h-[512px]"
-                          />
+                          <img src={result} alt="Generated result" className="w-full h-auto object-contain max-h-[512px]" />
                         </div>
                         <div className="flex flex-wrap gap-3 justify-center">
+                          {/* Existing Download Result button */}
                           <button
                             type="button"
                             onClick={() => downloadImage(result, 'generated-image.png')}
@@ -585,6 +596,7 @@ const handleGenerate = async () => {
                             </svg>
                             Download Result
                           </button>
+                          {/* Existing Edit This Result button */}
                           <button
                             type="button"
                             onClick={() => {
@@ -596,8 +608,8 @@ const handleGenerate = async () => {
                                     setFile(newFile);
                                     setOriginalFile(newFile);
                                     setImage(URL.createObjectURL(newFile));
-                                    setResult(null);
-                                    setMask(null);
+                                    setResult(null); // Clear result to go back to editor
+                                    setMask(null); // Optionally clear mask
                                   });
                               } catch (err) {
                                 setError("Couldn't prepare image for editing");
@@ -610,8 +622,65 @@ const handleGenerate = async () => {
                             </svg>
                             Edit This Result
                           </button>
+                          {/* New "Back to Editor" button */}
+                          <button
+                            type="button"
+                            onClick={() => setResult(null)} // Clear result to go back to editor
+                            className="inline-flex items-center gap-2 px-4 py-2 bg-gray-200 text-charcoal-gray rounded-lg hover:bg-gray-300 transition-colors duration-200 text-sm"
+                          >
+                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
+                               <path strokeLinecap="round" strokeLinejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
+                             </svg>
+                            Back to Editor
+                          </button>
                         </div>
                       </div>
+                      // END: Result Display UI
+                    ) : (
+                      // START: Mask Editor UI (existing code moved here)
+                      <div className="space-y-4"> {/* This was the wrapper for the Mask Editor Section */}
+                        <div className="flex justify-between items-center">
+                          <h3 className="text-lg font-medium text-charcoal-gray font-sans">Step 2: Draw Your Mask</h3>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setFile(null);
+                              setOriginalFile(null);
+                              setImage(null);
+                              setImageUrl(null);
+                              setMask(null);
+                              setResult(null);
+                            }}
+                            className="text-sm text-deep-blue hover:text-dark-blue transition-colors duration-200 font-sans"
+                          >
+                            Change Image
+                          </button>
+                        </div>
+                        <div className="bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg p-3 border border-purple-100">
+                          <p className="text-sm text-charcoal-gray">
+                            <strong>Instructions:</strong> Draw on the areas you want to edit or change. White areas will be modified by AI, black areas will remain unchanged.
+                          </p>
+                        </div>
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                          {/* Original Image Preview */}
+                          <div className="space-y-2">
+                            <h4 className="text-sm font-medium text-charcoal-gray">Original Image</h4>
+                            <div className="relative rounded-xl overflow-hidden border border-soft-gray bg-off-white">
+                              <img
+                                src={file ? URL.createObjectURL(file) : imageUrl}
+                                alt="Original image"
+                                className="w-full h-auto object-contain max-h-[400px]"
+                              />
+                            </div>
+                          </div>
+                          {/* Mask Editor */}
+                          <div className="space-y-2">
+                            <h4 className="text-sm font-medium text-charcoal-gray">Draw Your Mask</h4>
+                            <MaskEditor imageUrl={file ? imageObjectUrl : imageUrl} onMaskChange={setMask} />
+                          </div>
+                        </div>
+                      </div>
+                      // END: Mask Editor UI
                     )}
                   </div>
                 )}
@@ -683,19 +752,7 @@ const handleGenerate = async () => {
               </p>
             )}
             <ErrorDisplay error={error} />
-            {/* --- Replicate Result Display --- */}
-            {Array.isArray(result) && settings.model === 'ideogram' && result.length > 0 && (
-              <div className="mt-4 space-y-4">
-                <div className="font-sans font-medium text-charcoal-gray mb-2">Ideogram Results:</div>
-                <div className="grid grid-cols-1 gap-4">
-                  {result.map((imgUrl, idx) => (
-                    <div key={idx} className="rounded-xl overflow-hidden border border-soft-gray bg-white">
-                      <img src={imgUrl} alt={`Ideogram result ${idx + 1}`} className="w-full h-auto object-contain" />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            {/* Ideogram results are now shown in the main panel for Text-to-Image tab */}
           </div>
         </div>
         <Footer model={settings.model} />
