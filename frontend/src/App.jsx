@@ -429,7 +429,7 @@ const handleGenerate = async () => {
             {tab === 'text' && (
               <div className="space-y-6">
                 {/* Generated Result Display */}
-                {result && (
+                {result && !Array.isArray(result) && settings.model !== 'ideogram' && (
                   <div className="space-y-4">
                     <h3 className="text-lg font-medium text-charcoal-gray font-sans">Generated Image</h3>
                     <div className="relative rounded-xl overflow-hidden border border-soft-gray bg-off-white">
@@ -483,19 +483,19 @@ const handleGenerate = async () => {
             {/* IMAGE TO IMAGE TAB */}
             {tab === 'image' && (
               <div className="space-y-6">
-                {/* Image Input Component */}
-                <div className="space-y-4">
-                  <label className="block text-charcoal-gray font-medium mb-2 font-sans">Upload Image or Enter URL</label>
-                  <ImageInput 
-                    onImageChange={handleImageChange}
-                    currentImage={file}
-                  />
-                </div>
-                {/* If no image (file or URL) is provided, show upload prompt */}
+                {/* If no image (file or URL) is provided, show upload prompt and ImageInput */}
                 {!file && !imageUrl && (
-                  <div className="border-2 border-dashed border-soft-gray rounded-xl p-8 text-center">
-                    <div className="w-16 h-16 bg-soft-gray/30 rounded-full flex items-center justify-center mx-auto mb-4">
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8 text-charcoal-gray">
+                  <>
+                    <div className="space-y-4">
+                      <label className="block text-charcoal-gray font-medium mb-2 font-sans">Upload Image or Enter URL</label>
+                      <ImageInput 
+                        onImageChange={handleImageChange}
+                        currentImage={file}
+                      />
+                    </div>
+                    <div className="border-2 border-dashed border-soft-gray rounded-xl p-8 text-center">
+                      <div className="w-16 h-16 bg-soft-gray/30 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8 text-charcoal-gray">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
                       </svg>
                     </div>
@@ -563,7 +563,7 @@ const handleGenerate = async () => {
                       </div>
                     </div>
                     {/* Generated Result Display */}
-                    {result && (
+                    {result && !Array.isArray(result) && settings.model !== 'ideogram' && (
                       <div className="space-y-4">
                         <h3 className="text-lg font-medium text-charcoal-gray font-sans">Generated Result</h3>
                         <div className="relative rounded-xl overflow-hidden border border-soft-gray bg-off-white">
