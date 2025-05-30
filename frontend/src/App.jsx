@@ -9,7 +9,7 @@ import FlowiseChatbot from './components/FlowiseChatbot';
 
 const DEFAULT_SETTINGS = {
   provider: 'openai', // 'openai' or 'replicate'
-  model: 'gpt-image-1',
+  model: 'gpt-image-1', // For OpenAI: 'gpt-image-1', 'dall-e-2', etc. For Replicate: 'ideogram', 'sdxl', etc.
   size: '1024x1024',
   quality: 'high',
   background: 'auto',
@@ -187,26 +187,26 @@ const handleGenerate = async () => {
         });
       }
 
-      if (settings.model === 'ideogram') {
-        // Use Replicate Ideogram endpoint
+      if (settings.provider === 'replicate') {
+        // Use Replicate endpoint
         try {
           // Build basic request body
-          const reqBody = { prompt };
+          const reqBody = { prompt, model: settings.model };
           
           // Handle text-to-image vs image-to-image modes
           if (tab === 'text') {
             // Text-to-image: Just use the prompt
-            console.log('Ideogram text-to-image mode');
+            console.log('[REPLICATE] Text-to-image mode with model:', settings.model);
           } else if (tab === 'image') {
             // Image-to-image: Need both image and mask
-            console.log('Ideogram image-to-image mode');
+            console.log('[REPLICATE] Image-to-image mode with model:', settings.model);
             console.log('- File present:', !!file);
             console.log('- Image URL present:', !!imageUrl);
             console.log('- Mask present:', !!mask);
             
             // Check if we have either a file or URL
             if (!file && !imageUrl) {
-              setError('Please provide an image (upload or URL) for Ideogram inpainting.');
+              setError('Please provide an image (upload or URL) for Replicate inpainting.');
               setLoading(false);
               if (timerIntervalId) clearInterval(timerIntervalId);
               setTimerIntervalId(null);
@@ -295,11 +295,35 @@ const handleGenerate = async () => {
         if (tab === 'text') {
           // Text-to-image generation
           try {
+            let endpoint = '/api/generate';
+            
+            // Choose the appropriate endpoint based on provider
+            if (settings.provider === 'replicate') {
+              console.log('[GENERATE] Using Replicate API for text-to-image');
+              endpoint = '/api/replicate/ideogram'; // Use the Replicate endpoint
+            } else {
+              console.log('[GENERATE] Using OpenAI API for text-to-image');
+            }
+            
             const response = await axios.post(
-              import.meta.env.VITE_BACKEND_URL + '/api/generate',
+              import.meta.env.VITE_BACKEND_URL + endpoint,
               { prompt, ...settings }
             );
-            setResult(response.data.url);
+            
+            // Handle different response formats
+            if (settings.provider === 'replicate') {
+              // Replicate returns an output array
+              if (response.data.output && response.data.output.length > 0) {
+                setResult(response.data.output);
+              } else {
+                setResult(null);
+                setError('No result returned from Replicate');
+              }
+            } else {
+              // OpenAI returns a single image URL
+              setResult(response.data.url);
+            }
+            
             setLoading(false);
             if (timerIntervalId) clearInterval(timerIntervalId);
             setTimerIntervalId(null);
@@ -495,7 +519,7 @@ const handleGenerate = async () => {
                 )}
 
                 {/* Single Image Result (OpenAI) */}
-                {!loading && result && typeof result === 'string' && settings.model !== 'ideogram' && (
+                {!loading && result && typeof result === 'string' && settings.provider === 'openai' && (
                   <div className="space-y-4">
                     <div className="relative rounded-xl overflow-hidden border border-soft-gray bg-off-white">
                       <img
@@ -519,8 +543,8 @@ const handleGenerate = async () => {
                   </div>
                 )}
 
-                {/* Gallery Result (Ideogram) */}
-                {!loading && Array.isArray(result) && settings.model === 'ideogram' && result.length > 0 && (
+                {/* Gallery Result (Replicate) */}
+                {!loading && Array.isArray(result) && settings.provider === 'replicate' && result.length > 0 && (
                   <div className="space-y-4">
                     <div className="relative rounded-xl overflow-hidden border border-soft-gray bg-off-white">
                       <img 
