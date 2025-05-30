@@ -466,6 +466,10 @@ app.post('/api/replicate/ideogram', async (req, res) => {
     const allowedStyleTypes = ["None","Auto","General","Realistic","Design","Render 3D","Anime"];
     const allowedMagicPromptOptions = ["Auto","On","Off"];
 
+    // Get the model from the request or use default
+    const model = req.body.model || 'ideogram-ai/ideogram-v2-turbo';
+    console.log(`[REPLICATE] Using model: ${model}`);
+    
     // Validate and build input object for Replicate
     const input = { prompt };
     if (typeof negative_prompt === 'string' && negative_prompt.trim() !== '') input.negative_prompt = negative_prompt;
@@ -523,7 +527,7 @@ app.post('/api/replicate/ideogram', async (req, res) => {
       try {
         console.log(`Replicate API attempt ${retryCount + 1} of ${MAX_RETRIES}...`);
         output = await replicate.run(
-          "ideogram-ai/ideogram-v2-turbo",
+          model,
           { input }
         );
         // Success! Break out of retry loop

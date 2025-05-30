@@ -301,6 +301,12 @@ const handleGenerate = async () => {
             if (settings.provider === 'replicate') {
               console.log('[GENERATE] Using Replicate API for text-to-image');
               endpoint = '/api/replicate/ideogram'; // Use the Replicate endpoint
+              
+              // Set a default model for Replicate if not already specified
+              if (!settings.model || settings.model === 'gpt-image-1') {
+                console.log('[GENERATE] Setting default Replicate model to ideogram-ai/ideogram-v2-turbo');
+                settings.model = 'ideogram-ai/ideogram-v2-turbo';
+              }
             } else {
               console.log('[GENERATE] Using OpenAI API for text-to-image');
             }
