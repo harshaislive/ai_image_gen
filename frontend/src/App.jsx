@@ -156,9 +156,15 @@ const handleGenerate = async () => {
 
   // --- Main Generation/Editing Logic ---
   const proceedGenerate = async () => {
+    if (timerIntervalId) {
+      clearInterval(timerIntervalId);
+    }
+    setTimer(0);
+    // setSelectedIdeogramImage(null); // This is handled by useEffect watching result
+
     setLoading(true);
     setError('');
-    setResult(null);
+    setResult(null); 
 
     // Start timer
     let seconds = 0;
@@ -292,9 +298,17 @@ const handleGenerate = async () => {
               { prompt, ...settings }
             );
             setResult(response.data.url);
+            setLoading(false);
+            if (timerIntervalId) clearInterval(timerIntervalId);
+            setTimerIntervalId(null);
+            setTimer(0);
           } catch (err) {
             console.error('Error generating image:', err);
             setError(err?.response?.data?.error || 'Failed to generate image.');
+            setLoading(false);
+            if (timerIntervalId) clearInterval(timerIntervalId);
+            setTimerIntervalId(null);
+            setTimer(0);
           }
         } else if (tab === 'image') {
           // Image editing - need either file or URL
@@ -339,10 +353,18 @@ const handleGenerate = async () => {
               import.meta.env.VITE_BACKEND_URL + '/api/edit',
               body
             );
-            setResult(response.data.url);
+            setResult(response.data.image);
+            setLoading(false);
+            if (timerIntervalId) clearInterval(timerIntervalId);
+            setTimerIntervalId(null);
+            setTimer(0);
           } catch (err) {
             console.error('Error during image edit:', err);
             setError(err?.response?.data?.error || 'Failed to edit image.');
+            setLoading(false);
+            if (timerIntervalId) clearInterval(timerIntervalId);
+            setTimerIntervalId(null);
+            setTimer(0);
           }
         }
       }
