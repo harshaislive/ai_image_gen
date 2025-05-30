@@ -284,14 +284,20 @@ const MaskEditor = ({ imageUrl, onMaskChange }) => {
   // Memoized line rendering for better performance
   const renderedLines = useMemo(() => {
     return lines.map((line, i) => {
-      // Define colors based on tool and inversion state
+      // Define colors based on what they represent for OpenAI masking
+      // BLACK = Areas to edit (will be changed by AI)
+      // WHITE = Areas to preserve (will remain unchanged)
       let lineColor;
       if (isMaskInverted) {
-        // For inverted masks: brush shows red, eraser shows blue
-        lineColor = line.tool === 'brush' ? 'rgba(255, 0, 0, 0.7)' : 'rgba(30, 144, 255, 0.7)';
+        // For inverted masks: 
+        // - Brush creates areas to preserve (WHITE)
+        // - Eraser creates areas to edit (BLACK)
+        lineColor = line.tool === 'brush' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)';
       } else {
-        // For normal masks: brush shows blue, eraser shows red
-        lineColor = line.tool === 'brush' ? 'rgba(30, 144, 255, 0.7)' : 'rgba(255, 0, 0, 0.7)';
+        // For normal masks:
+        // - Brush creates areas to edit (BLACK)
+        // - Eraser creates areas to preserve (WHITE)
+        lineColor = line.tool === 'brush' ? 'rgba(0, 0, 0, 0.7)' : 'rgba(255, 255, 255, 0.7)';
       }
       
       // Only render lines that have valid points

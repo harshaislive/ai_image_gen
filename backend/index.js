@@ -211,33 +211,63 @@ app.post('/api/edit', async (req, res) => {
     fs.writeFileSync(imgPath, imageBuffer);
     
     if (mask && maskBuffer) {
-      const sharp = (await import('sharp')).default; // Ensure sharp is available in this scope if not already.
-      // Process the mask: ensure it's RGBA, then use its luminance for the new alpha.
-      // The input mask from frontend is B&W (black for edit, white for preserve).
-      // We need an output mask for OpenAI where RGB is black, and Alpha is:
-      //   0 (transparent) for 'edit' areas (frontend black).
-      //   255 (opaque) for 'preserve' areas (frontend white).
-
-      // Convert the input mask to raw grayscale pixel data first.
-      const { data: maskPixelData, info: maskInfo } = await sharp(maskBuffer)
-        .greyscale() // Convert to single channel grayscale
-        .raw()
-        .toBuffer({ resolveWithObject: true });
-
-      // Create a new buffer for the final RGBA mask.
-      const finalMaskRgbaBuffer = Buffer.alloc(maskInfo.width * maskInfo.height * 4);
-      for (let i = 0; i < maskInfo.width * maskInfo.height; i++) {
-        const grayscaleValue = maskPixelData[i]; // This is the grayscale value (0 for black, 255 for white).
-        finalMaskRgbaBuffer[i * 4 + 0] = 0;   // R channel = 0
-        finalMaskRgbaBuffer[i * 4 + 1] = 0;   // G channel = 0
-        finalMaskRgbaBuffer[i * 4 + 2] = 0;   // B channel = 0
-        finalMaskRgbaBuffer[i * 4 + 3] = grayscaleValue; // Alpha channel = grayscale value
-      }
-
-      // Save the newly created RGBA mask to a file.
-      await sharp(finalMaskRgbaBuffer, { raw: { width: maskInfo.width, height: maskInfo.height, channels: 4 } })
+      // Process the mask according to OpenAI documentation for GPT-image-1
+      // From the docs: "The mask image must also contain an alpha channel"
+      // Black areas (0) in the mask = areas to edit
+      // White areas (255) in the mask = areas to preserve
+      
+      try {
+        console.log('[MASK] Processing mask for GPT-image-1...');
+        
+        // First convert to grayscale to ensure we're working with a proper B&W mask
+        const { data: maskPixelData, info: maskInfo } = await sharp(maskBuffer)
+          .grayscale() // Ensure grayscale
+          .raw()
+          .toBuffer({ resolveWithObject: true });
+        
+        console.log(`[MASK] Grayscale mask dimensions: ${maskInfo.width}x${maskInfo.height}`);
+        
+        // Following the OpenAI documentation example for adding alpha channel to B&W mask
+        // Create an RGBA image where:
+        // - RGB values are preserved from the original mask
+        // - Alpha channel is set to the grayscale value itself
+        // This matches the Python example in the OpenAI docs:
+        // mask_rgba = mask.convert("RGBA")
+        // mask_rgba.putalpha(mask)
+        
+        const finalMaskBuffer = Buffer.alloc(maskInfo.width * maskInfo.height * 4);
+        
+        for (let i = 0; i < maskInfo.width * maskInfo.height; i++) {
+          const grayscaleValue = maskPixelData[i]; // 0 (black) to 255 (white)
+          
+          // Set RGB to the grayscale value (creates a B&W image)
+          finalMaskBuffer[i * 4 + 0] = grayscaleValue; // R
+          finalMaskBuffer[i * 4 + 1] = grayscaleValue; // G
+          finalMaskBuffer[i * 4 + 2] = grayscaleValue; // B
+          
+          // Set alpha to the same grayscale value
+          // Black areas (0) = transparent (alpha=0) = areas to edit
+          // White areas (255) = opaque (alpha=255) = areas to preserve
+          finalMaskBuffer[i * 4 + 3] = grayscaleValue;
+        }
+        
+        // Save the processed mask as PNG
+        await sharp(finalMaskBuffer, {
+          raw: {
+            width: maskInfo.width,
+            height: maskInfo.height,
+            channels: 4 // RGBA
+          }
+        })
         .png()
         .toFile(maskPath);
+        
+        console.log(`[MASK] Successfully created mask at: ${maskPath}`);
+        console.log(`[IMAGE] Image saved at: ${imgPath}`);
+      } catch (err) {
+        console.error('[ERROR] Failed to process mask:', err);
+        return res.status(500).json({ error: 'Failed to process mask: ' + err.message });
+      }
     }
 
     // Prepare form data
@@ -247,25 +277,53 @@ app.post('/api/edit', async (req, res) => {
     
     // Add all parameters
     console.log('[EDIT] Adding parameters to form');
-    form.append('model', model);
-    form.append('prompt', prompt);
     
-    // Check if image file exists
-    if (!fs.existsSync(imgPath)) {
-      console.error('[ERROR] Image file does not exist:', imgPath);
-      return res.status(500).json({ error: 'Image file not found on server' });
-    }
-    
-    console.log('[EDIT] Adding image to form:', imgPath);
-    form.append('image', fs.createReadStream(imgPath));
-    
-    if (mask && maskBuffer) {
-      if (!fs.existsSync(maskPath)) {
-        console.error('[ERROR] Mask file does not exist:', maskPath);
-        return res.status(500).json({ error: 'Mask file not found on server' });
+    // Handle different models differently
+    if (model === 'dall-e-2') {
+      // DALL-E 2 supports the edit endpoint with mask
+      form.append('model', model);
+      form.append('prompt', prompt);
+      
+      // Check if image file exists
+      if (!fs.existsSync(imgPath)) {
+        console.error('[ERROR] Image file does not exist:', imgPath);
+        return res.status(500).json({ error: 'Image file not found on server' });
       }
-      console.log('[EDIT] Adding mask to form:', maskPath);
-      form.append('mask', fs.createReadStream(maskPath));
+      
+      console.log('[EDIT] Adding image to form:', imgPath);
+      form.append('image', fs.createReadStream(imgPath));
+      
+      if (mask && maskBuffer) {
+        if (!fs.existsSync(maskPath)) {
+          console.error('[ERROR] Mask file does not exist:', maskPath);
+          return res.status(500).json({ error: 'Mask file not found on server' });
+        }
+        console.log('[EDIT] Adding mask to form:', maskPath);
+        form.append('mask', fs.createReadStream(maskPath));
+      }
+    } else {
+      // For gpt-image-1 and other models, we need to use a different approach
+      // We'll use the images/edit endpoint but with different parameters
+      form.append('model', model);
+      form.append('prompt', prompt);
+      
+      // Check if image file exists
+      if (!fs.existsSync(imgPath)) {
+        console.error('[ERROR] Image file does not exist:', imgPath);
+        return res.status(500).json({ error: 'Image file not found on server' });
+      }
+      
+      console.log('[EDIT] Adding image to form:', imgPath);
+      form.append('image', fs.createReadStream(imgPath));
+      
+      if (mask && maskBuffer) {
+        if (!fs.existsSync(maskPath)) {
+          console.error('[ERROR] Mask file does not exist:', maskPath);
+          return res.status(500).json({ error: 'Mask file not found on server' });
+        }
+        console.log('[EDIT] Adding mask to form:', maskPath);
+        form.append('mask', fs.createReadStream(maskPath));
+      }
     }
     
     form.append('n', n);
@@ -293,9 +351,14 @@ app.post('/api/edit', async (req, res) => {
         formHeaders: Object.keys(form.getHeaders())
       });
       
+      // For GPT-image-1, we use the images/edit endpoint as per OpenAI docs
+      const endpoint = 'https://api.openai.com/v1/images/edits';
+      
+      console.log(`[EDIT] Using API endpoint: ${endpoint} with model ${model}`);
+      
       // Make the API call with a timeout
       const response = await axios.post(
-        'https://api.openai.com/v1/images/edits',
+        endpoint,
         form,
         {
           headers: {
@@ -490,6 +553,154 @@ app.post('/api/replicate/ideogram', async (req, res) => {
       return res.status(500).json({ error: err.response.data.error || JSON.stringify(err.response.data) });
     }
     console.error('[REPLICATE ERROR]', err);
+    return res.status(500).json({ error: err.message || 'Replicate API error' });
+  }
+});
+
+// --- Replicate Image Edit with Mask Endpoint ---
+app.post('/api/replicate/edit', async (req, res) => {
+  try {
+    if (!REPLICATE_API_TOKEN) {
+      return res.status(500).json({ error: 'Missing REPLICATE_API_TOKEN in .env' });
+    }
+
+    console.log('[REPLICATE EDIT] Incoming request to /api/replicate/edit');
+    const replicate = new Replicate({ auth: REPLICATE_API_TOKEN });
+
+    // Extract request parameters
+    const { prompt, model = 'stability-ai/sdxl-inpainting:e5a34f7f9060b84b497a8c9cf3f12d43ca0c7875a99e7b301a83d81b5c82cdac' } = req.body;
+    
+    // Define effectiveServerUrl for Replicate callbacks
+    const effectiveServerUrl = PUBLIC_BACKEND_URL || `http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`;
+    if (!PUBLIC_BACKEND_URL) {
+      console.warn(`[WARN] PUBLIC_BACKEND_URL is not set. Defaulting to ${effectiveServerUrl}. Replicate may not be able to access temporary image/mask URLs unless this server is publicly accessible and PUBLIC_BACKEND_URL is configured to its public address.`);
+    }
+
+    // Handle file uploads
+    if (!req.files || !req.files.image) {
+      return res.status(400).json({ error: 'No image file uploaded' });
+    }
+
+    // Get the uploaded image and mask
+    const imageFile = req.files.image;
+    const maskFile = req.files.mask;
+    const imageBuffer = imageFile.data;
+    const maskBuffer = maskFile ? maskFile.data : null;
+
+    // Create unique filenames
+    const timestamp = Date.now();
+    const imgFilename = `image_${timestamp}.png`;
+    const maskFilename = maskBuffer ? `mask_${timestamp}.png` : null;
+    const imgPath = path.join(uploadsDir, imgFilename);
+    const maskPath = maskBuffer ? path.join(uploadsDir, maskFilename) : null;
+
+    // Save the image file
+    fs.writeFileSync(imgPath, imageBuffer);
+    
+    if (maskBuffer) {
+      // Process the mask according to Replicate's requirements
+      // Most Replicate models expect a similar format to OpenAI
+      try {
+        console.log('[REPLICATE MASK] Processing mask...');
+        
+        // First convert to grayscale to ensure we're working with a proper B&W mask
+        const { data: maskPixelData, info: maskInfo } = await sharp(maskBuffer)
+          .grayscale() // Ensure grayscale
+          .raw()
+          .toBuffer({ resolveWithObject: true });
+        
+        console.log(`[REPLICATE MASK] Grayscale mask dimensions: ${maskInfo.width}x${maskInfo.height}`);
+        
+        // Create an RGBA image where:
+        // - RGB values are preserved from the original mask
+        // - Alpha channel is set to the grayscale value itself
+        const finalMaskBuffer = Buffer.alloc(maskInfo.width * maskInfo.height * 4);
+        
+        for (let i = 0; i < maskInfo.width * maskInfo.height; i++) {
+          const grayscaleValue = maskPixelData[i]; // 0 (black) to 255 (white)
+          
+          // Set RGB to the grayscale value (creates a B&W image)
+          finalMaskBuffer[i * 4 + 0] = grayscaleValue; // R
+          finalMaskBuffer[i * 4 + 1] = grayscaleValue; // G
+          finalMaskBuffer[i * 4 + 2] = grayscaleValue; // B
+          
+          // Set alpha to the same grayscale value
+          // Black areas (0) = transparent (alpha=0) = areas to edit
+          // White areas (255) = opaque (alpha=255) = areas to preserve
+          finalMaskBuffer[i * 4 + 3] = grayscaleValue;
+        }
+        
+        // Save the processed mask as PNG
+        await sharp(finalMaskBuffer, {
+          raw: {
+            width: maskInfo.width,
+            height: maskInfo.height,
+            channels: 4 // RGBA
+          }
+        })
+        .png()
+        .toFile(maskPath);
+        
+        console.log(`[REPLICATE MASK] Successfully created mask at: ${maskPath}`);
+        console.log(`[REPLICATE IMAGE] Image saved at: ${imgPath}`);
+      } catch (err) {
+        console.error('[ERROR] Failed to process mask:', err);
+        return res.status(500).json({ error: 'Failed to process mask: ' + err.message });
+      }
+    }
+
+    // Create URLs for the files
+    const imageUrl = `${effectiveServerUrl}/uploads/${imgFilename}`;
+    const maskUrl = maskPath ? `${effectiveServerUrl}/uploads/${maskFilename}` : null;
+
+    console.log('[REPLICATE EDIT] Image URL:', imageUrl);
+    if (maskUrl) console.log('[REPLICATE EDIT] Mask URL:', maskUrl);
+
+    // Prepare input for Replicate
+    const input = {
+      prompt: prompt,
+      image: imageUrl,
+      mask_image: maskUrl,
+      num_outputs: 1,
+      guidance_scale: 7.5,
+      num_inference_steps: 50,
+    };
+
+    console.log('[REPLICATE EDIT] Sending request to Replicate...');
+    console.log('[REPLICATE EDIT] Model:', model);
+    console.log('[REPLICATE EDIT] Prompt:', prompt);
+
+    // Call Replicate API
+    const MAX_RETRIES = 3;
+    let retryCount = 0;
+    let output = null;
+
+    while (retryCount < MAX_RETRIES && !output) {
+      try {
+        console.log(`[REPLICATE EDIT] API attempt ${retryCount + 1} of ${MAX_RETRIES}...`);
+        output = await replicate.run(model, { input });
+      } catch (err) {
+        retryCount++;
+        if (err.message && err.message.includes('PA')) {
+          console.log(`[REPLICATE EDIT] API interrupted (code: PA), retrying... (${retryCount}/${MAX_RETRIES})`);
+          await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds before retry
+        } else if (retryCount < MAX_RETRIES) {
+          console.log(`[REPLICATE EDIT] API error, retrying... (${retryCount}/${MAX_RETRIES})`);
+          await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds before retry
+        } else {
+          throw err; // Re-throw if we've exhausted retries
+        }
+      }
+    }
+
+    console.log('[REPLICATE EDIT] Response received:', output);
+    return res.json({ output });
+  } catch (err) {
+    if (err.response && err.response.data) {
+      console.error('[REPLICATE EDIT ERROR]', err.response.data);
+      return res.status(500).json({ error: err.response.data.detail || 'Replicate API error' });
+    }
+    console.error('[REPLICATE EDIT ERROR]', err);
     return res.status(500).json({ error: err.message || 'Replicate API error' });
   }
 });

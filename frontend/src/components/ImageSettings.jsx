@@ -15,6 +15,25 @@ const ImageSettings = ({ settings, onChange }) => {
       
       <div className="basic-settings space-y-4">
         <div className="setting-group">
+          <label className="block text-sm font-medium text-charcoal-gray mb-2 font-sans">Provider</label>
+          <div className="grid grid-cols-2 gap-2">
+            {['openai', 'replicate'].map(provider => (
+              <button
+                type="button"
+                key={provider}
+                className={`py-2.5 px-3 text-sm rounded-lg font-medium transition-all duration-200 font-sans capitalize ${
+                  settings.provider === provider 
+                    ? 'bg-deep-blue text-white shadow-md' 
+                    : 'bg-warm-yellow text-rich-red hover:bg-warm-yellow/80'
+                }`}
+                onClick={() => handleChange('provider', provider)}
+              >
+                {provider}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="setting-group">
           <label className="block text-sm font-medium text-charcoal-gray mb-2 font-sans">Image Size</label>
           <div className="grid grid-cols-1 gap-2">
             {['1024x1024', '1024x1536', '1536x1024'].map(size => (

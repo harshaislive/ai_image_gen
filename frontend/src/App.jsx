@@ -8,6 +8,7 @@ import FlowiseChatbot from './components/FlowiseChatbot';
 // Removed top-level readFileAsDataURL - will define it locally where needed
 
 const DEFAULT_SETTINGS = {
+  provider: 'openai', // 'openai' or 'replicate'
   model: 'gpt-image-1',
   size: '1024x1024',
   quality: 'high',
@@ -32,14 +33,15 @@ function ErrorDisplay({ error }) {
 }
 
 // --- Footer Component ---
-function Footer({ model }) {
+function Footer({ model, provider }) {
   return (
     <div className="text-center mt-8 space-y-2 font-sans">
       <div className="text-sm text-gray-500">
+        Provider: <span className="font-medium text-charcoal-gray capitalize">{provider || 'openai'}</span> • 
         Model: <span className="font-medium text-charcoal-gray">{model || 'gpt-image-1'}</span>
       </div>
       <div className="text-xs text-charcoal-gray/60 font-sans">
-        Built with ❤️ • Powered by OpenAI
+        Built with ❤️ • Powered by {provider === 'replicate' ? 'Replicate' : 'OpenAI'}
       </div>
     </div>
   );
@@ -349,11 +351,35 @@ const handleGenerate = async () => {
             if (mask) body.mask = mask;
 
             console.log('[EDIT] Preparing request...');
+            
+            // Choose the appropriate endpoint based on provider
+            let endpoint = '/api/edit';
+            if (settings.provider === 'replicate') {
+              console.log('[EDIT] Using Replicate API for image editing');
+              endpoint = '/api/replicate/edit';
+            } else {
+              console.log('[EDIT] Using OpenAI API for image editing');
+            }
+            
             const response = await axios.post(
-              import.meta.env.VITE_BACKEND_URL + '/api/edit',
+              import.meta.env.VITE_BACKEND_URL + endpoint,
               body
             );
-            setResult(response.data.image);
+            
+            // Handle different response formats
+            if (settings.provider === 'replicate') {
+              // Replicate returns an output array
+              if (response.data.output && response.data.output.length > 0) {
+                setResult(response.data.output[0]);
+              } else {
+                setResult(null);
+                setError('No result returned from Replicate');
+              }
+            } else {
+              // OpenAI returns a single image URL
+              setResult(response.data.image);
+            }
+            
             setLoading(false);
             if (timerIntervalId) clearInterval(timerIntervalId);
             setTimerIntervalId(null);
@@ -623,22 +649,13 @@ const handleGenerate = async () => {
                           <strong>Instructions:</strong> Draw on the areas you want to edit or change. White areas will be modified by AI, black areas will remain unchanged.
                         </p>
                       </div>
-                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        {/* Original Image Preview */}
-                        <div className="space-y-2">
-                          <h4 className="text-sm font-medium text-charcoal-gray">Original Image</h4>
-                          <div className="relative rounded-xl overflow-hidden border border-soft-gray bg-off-white">
-                            <img
-                              src={file ? URL.createObjectURL(file) : imageUrl}
-                              alt="Original image"
-                              className="w-full h-auto object-contain max-h-[400px]"
-                            />
-                          </div>
-                        </div>
-                        {/* Mask Editor */}
+                      <div className="space-y-4">
+                        {/* Mask Editor - Single Column */}
                         <div className="space-y-2">
                           <h4 className="text-sm font-medium text-charcoal-gray">Draw Your Mask</h4>
-                          <MaskEditor imageUrl={file ? imageObjectUrl : imageUrl} onMaskChange={setMask} />
+                          <div className="relative rounded-xl overflow-hidden border border-soft-gray bg-off-white">
+                            <MaskEditor imageUrl={file ? imageObjectUrl : imageUrl} onMaskChange={setMask} />
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -834,7 +851,7 @@ const handleGenerate = async () => {
             {/* Ideogram results are now shown in the main panel for Text-to-Image tab */}
           </div>
         </div>
-        <Footer model={settings.model} />
+        <Footer model={settings.model} provider={settings.provider} />
       </div>
     </div>
   );
