@@ -693,19 +693,14 @@ const handleGenerate = async () => {
 
                     {/* START: Results Display Area (conditional) */}
                     {/* Loading State for results on this tab */}
-                    {loading && settings.model !== 'ideogram' && (
-                      <div className="flex justify-center items-center h-64 mt-4">
-                        <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-deep-blue"></div>
-                      </div>
-                    )}
-                    {loading && settings.model === 'ideogram' && (
+                    {loading && (
                       <div className="flex justify-center items-center h-64 mt-4">
                         <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-deep-blue"></div>
                       </div>
                     )}
 
                     {/* OpenAI Edit Result Display */}
-                    {!loading && result && typeof result === 'string' && settings.model !== 'ideogram' && (
+                    {!loading && result && typeof result === 'string' && settings.provider === 'openai' && (
                       <div className="space-y-4 mt-6 pt-6 border-t border-soft-gray">
                         <h3 className="text-lg font-medium text-charcoal-gray font-sans">Generated Result</h3>
                         <div className="relative rounded-xl overflow-hidden border border-soft-gray bg-off-white">
@@ -761,18 +756,18 @@ const handleGenerate = async () => {
                       </div>
                     )}
 
-                    {/* Ideogram Result Gallery Display */}
-                    {!loading && Array.isArray(result) && settings.model === 'ideogram' && result.length > 0 && (
+                    {/* Replicate Result Display */}
+                    {!loading && result && settings.provider === 'replicate' && (
                       <div className="space-y-4 mt-6 pt-6 border-t border-soft-gray">
-                        <h3 className="text-lg font-medium text-charcoal-gray font-sans">Ideogram Generated Results</h3>
+                        <h3 className="text-lg font-medium text-charcoal-gray font-sans">Replicate Generated Result</h3>
                         <div className="relative rounded-xl overflow-hidden border border-soft-gray bg-off-white">
                           <img 
-                            src={selectedIdeogramImage || result[0]} 
-                            alt="Selected Ideogram image" 
+                            src={Array.isArray(result) ? (selectedIdeogramImage || result[0]) : result} 
+                            alt="Generated result" 
                             className="w-full h-auto object-contain max-h-[480px]" 
                           />
                         </div>
-                        {result.length > 1 && (
+                        {Array.isArray(result) && result.length > 1 && (
                           <div className="flex flex-wrap gap-2 justify-center p-2 bg-soft-gray/20 rounded-lg">
                             {result.map((imgUrl, idx) => (
                               <button 
@@ -788,8 +783,8 @@ const handleGenerate = async () => {
                         <div className="flex flex-wrap gap-3 justify-center">
                           <button 
                             type="button" 
-                            onClick={() => downloadImage(selectedIdeogramImage || result[0], 'ideogram-image.png')} 
-                            disabled={!(selectedIdeogramImage || (result && result.length > 0 && result[0]))}
+                            onClick={() => downloadImage(Array.isArray(result) ? (selectedIdeogramImage || result[0]) : result, 'replicate-image.png')} 
+                            disabled={!result}
                             className="inline-flex items-center gap-2 px-4 py-2 bg-deep-blue text-white rounded-lg hover:bg-dark-blue transition-colors duration-200 text-sm disabled:bg-gray-300"
                           >
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
