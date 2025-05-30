@@ -4,7 +4,21 @@ const ImageSettings = ({ settings, onChange }) => {
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const handleChange = (key, value) => {
-    onChange({ ...settings, [key]: value });
+    // If changing provider, also update the model to a default for that provider
+    if (key === 'provider') {
+      const newSettings = { ...settings, [key]: value };
+      
+      // Set default model based on provider
+      if (value === 'openai' && !settings.model.includes('gpt-image') && !settings.model.includes('dall-e')) {
+        newSettings.model = 'gpt-image-1';
+      } else if (value === 'replicate' && (settings.model.includes('gpt-image') || settings.model.includes('dall-e'))) {
+        newSettings.model = 'ideogram-ai/ideogram-v2-turbo';
+      }
+      
+      onChange(newSettings);
+    } else {
+      onChange({ ...settings, [key]: value });
+    }
   };
 
   return (
@@ -94,10 +108,21 @@ const ImageSettings = ({ settings, onChange }) => {
               value={settings.model}
               onChange={(e) => handleChange('model', e.target.value)}
             >
-              <option value="gpt-image-1">GPT Image 1</option>
-              <option value="dall-e-3">DALL-E 3</option>
-              <option value="dall-e-2">DALL-E 2</option>
-              <option value="ideogram">Ideogram (Replicate)</option>
+              {settings.provider === 'openai' ? (
+                // OpenAI models
+                <>
+                  <option value="gpt-image-1">GPT Image 1</option>
+                  <option value="dall-e-3">DALL-E 3</option>
+                  <option value="dall-e-2">DALL-E 2</option>
+                </>
+              ) : (
+                // Replicate models
+                <>
+                  <option value="ideogram-ai/ideogram-v2-turbo">Ideogram v2 Turbo</option>
+                  <option value="stability-ai/sdxl:39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b">Stable Diffusion XL</option>
+                  <option value="stability-ai/sdxl-inpainting:e5a34f7f9060b84b497a8c9cf3f12d43ca0c7875a99e7b301a83d81b5c82cdac">SDXL Inpainting</option>
+                </>
+              )}
             </select>
           </div>
 
