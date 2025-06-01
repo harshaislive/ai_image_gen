@@ -187,103 +187,159 @@ const handleGenerate = async () => {
         });
       }
 
-      if (settings.provider === 'replicate') {
-        // Use Replicate endpoint
+      // Helper function to convert data URL to Blob
+      function dataURLtoBlob(dataurl) {
+        if (!dataurl) throw new Error('Invalid dataURL: input is null or undefined');
+        const arr = dataurl.split(',');
+        if (arr.length < 2) throw new Error('Invalid dataURL format: missing comma separator');
+
+        const mimeMatch = arr[0].match(/:(.*?);/);
+        if (!mimeMatch || mimeMatch.length < 2) throw new Error('Invalid dataURL format: could not parse MIME type');
+        const mime = mimeMatch[1];
+
+        let bstr;
         try {
-          // Build basic request body
-          const reqBody = { prompt, model: settings.model };
-          
-          // Handle text-to-image vs image-to-image modes
+          bstr = atob(arr[1]);
+        } catch (e) {
+          throw new Error('Invalid dataURL: base64 decoding failed. ' + e.message);
+        }
+
+        let n = bstr.length;
+        const u8arr = new Uint8Array(n);
+        while(n--){
+            u8arr[n] = bstr.charCodeAt(n);
+        }
+        return new Blob([u8arr], {type:mime});
+      }
+
+      if (settings.provider === 'replicate') {
+        let dataPayload;
+        let currentReplicateEndpoint;
+
+        try {
           if (tab === 'text') {
-            // Text-to-image: Just use the prompt
+            currentReplicateEndpoint = import.meta.env.VITE_BACKEND_URL + '/api/replicate/ideogram';
+            const reqBody = { prompt, model: settings.model };
             console.log('[REPLICATE] Text-to-image mode with model:', settings.model);
-          } else if (tab === 'image') {
-            // Image-to-image: Need both image and mask
-            console.log('[REPLICATE] Image-to-image mode with model:', settings.model);
-            console.log('- File present:', !!file);
-            console.log('- Image URL present:', !!imageUrl);
-            console.log('- Mask present:', !!mask);
+
+            // Add optional parameters for text-to-image if present
+            if (settings.negative_prompt) reqBody.negative_prompt = settings.negative_prompt;
+            if (settings.aspect_ratio) reqBody.aspect_ratio = settings.aspect_ratio;
+            // Assuming 'resolution' and 'style_type' are specific to ideogram or similar text models
+            if (settings.resolution && settings.resolution !== 'None') reqBody.resolution = settings.resolution;
+            if (settings.style_type && settings.style_type !== 'None') reqBody.style_type = settings.style_type;
+            if (settings.magic_prompt_option) reqBody.magic_prompt_option = settings.magic_prompt_option;
+            if (typeof settings.seed === 'number') reqBody.seed = settings.seed;
             
-            // Check if we have either a file or URL
+            // Remove any undefined/null/empty values from reqBody
+            Object.keys(reqBody).forEach(key => {
+              if (reqBody[key] === undefined || reqBody[key] === null || reqBody[key] === '') {
+                delete reqBody[key];
+              }
+            });
+            dataPayload = reqBody;
+            console.log('Sending JSON request to Replicate (text-to-image) with keys:', Object.keys(dataPayload));
+
+          } else { // tab === 'image'
+            currentReplicateEndpoint = import.meta.env.VITE_BACKEND_URL + '/api/replicate/edit';
+            console.log('[REPLICATE] Image-to-image mode with model:', settings.model, 'calling endpoint:', currentReplicateEndpoint);
+
             if (!file && !imageUrl) {
               setError('Please provide an image (upload or URL) for Replicate inpainting.');
-              setLoading(false);
-              if (timerIntervalId) clearInterval(timerIntervalId);
-              setTimerIntervalId(null);
-              setTimer(0);
+              setLoading(false); if (timerIntervalId) clearInterval(timerIntervalId); setTimerIntervalId(null); setTimer(0);
               return;
             }
-            
-            // Create placeholder mask if none exists
-            if (!mask) {
-              console.log('No mask detected, creating a simple placeholder mask');
-              // Create a simple placeholder mask
+
+            const formData = new FormData();
+            formData.append('prompt', prompt);
+            if (settings.model) {
+              formData.append('model', settings.model);
+            }
+            // Add other relevant settings for image editing if supported by backend/model
+            if (settings.negative_prompt) formData.append('negative_prompt', settings.negative_prompt);
+            if (typeof settings.seed === 'number') formData.append('seed', settings.seed);
+            // Add other Replicate specific params for inpainting if available in settings, e.g.
+            // if (settings.strength) formData.append('strength', settings.strength);
+
+            // Image handling
+            if (file) {
+              formData.append('image', file, file.name || 'image.png');
+              console.log('- Appended image file to FormData:', file.name);
+            } else if (imageUrl) {
+              try {
+                const response = await fetch(imageUrl);
+                if (!response.ok) throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
+                const imageBlob = await response.blob();
+                formData.append('image', imageBlob, 'image_from_url.png');
+                console.log('- Fetched and appended image URL as blob to FormData.');
+              } catch (fetchErr) {
+                console.error('Error fetching image URL for FormData:', fetchErr);
+                setError(`Failed to fetch image from URL: ${fetchErr.message}`);
+                setLoading(false); if (timerIntervalId) clearInterval(timerIntervalId); setTimerIntervalId(null); setTimer(0);
+                return;
+              }
+            }
+
+            // Mask handling
+            let maskDataURL = mask; // User-drawn mask
+            if (!maskDataURL) {
+              console.log('No user mask detected, creating a simple placeholder mask for Replicate edit');
               const canvas = document.createElement('canvas');
               const ctx = canvas.getContext('2d');
-              
-              // Set canvas dimensions
-              canvas.width = 512;
+              canvas.width = 512; // Or use image dimensions if available
               canvas.height = 512;
-              
-              // Create a simple mask (white background with black circle in center)
-              ctx.fillStyle = 'white';
+              ctx.fillStyle = 'white'; // Typically, white means "unchanged" for Replicate inpainting
               ctx.fillRect(0, 0, canvas.width, canvas.height);
-              ctx.fillStyle = 'black';
+              ctx.fillStyle = 'black'; // Black means "to be inpainted"
               ctx.beginPath();
-              ctx.arc(canvas.width/2, canvas.height/2, 100, 0, Math.PI * 2);
-              ctx.fill();
-              
-              // Convert to data URL
-              const placeholderMask = canvas.toDataURL('image/png');
-              console.log('Created placeholder mask with length:', placeholderMask.length);
-              reqBody.mask = placeholderMask;
+              // Example: Inpaint the center square if no mask is drawn
+              ctx.fillRect(canvas.width * 0.25, canvas.height * 0.25, canvas.width * 0.5, canvas.height * 0.5);
+              // ctx.arc(canvas.width/2, canvas.height/2, 100, 0, Math.PI * 2); // Original circle placeholder
+              // ctx.fill();
+              maskDataURL = canvas.toDataURL('image/png');
+              console.log('Created placeholder mask for inpainting.');
+            }
+
+            if (maskDataURL) {
+              try {
+                const maskBlob = dataURLtoBlob(maskDataURL);
+                formData.append('mask', maskBlob, 'mask.png');
+                console.log('- Appended mask data URL as blob to FormData.');
+              } catch (blobErr) {
+                console.error('Error converting mask data URL to Blob:', blobErr);
+                setError(`Failed to process mask data: ${blobErr.message}`);
+                setLoading(false); if (timerIntervalId) clearInterval(timerIntervalId); setTimerIntervalId(null); setTimer(0);
+                return;
+              }
             } else {
-              reqBody.mask = mask;
+              // This case should ideally not be hit if placeholder is always created,
+              // but as a safeguard or if a mask is truly optional for some models:
+              console.log('- No mask provided or generated to append to FormData.');
+              // Depending on backend, might need to setError or proceed without mask
             }
-            
-            // Set the image (either from file or URL)
-            if (file) {
-              // Convert file to data URL
-              const imageDataUrl = await readFileAsDataURL(file);
-              reqBody.image = imageDataUrl;
-              console.log('- Image data URL length:', imageDataUrl?.length || 0);
-            } else if (imageUrl) {
-              // Use the URL directly
-              reqBody.image = imageUrl;
-              console.log('- Using image URL:', imageUrl);
+            dataPayload = formData;
+            console.log('Sending FormData request to Replicate (image-to-image). FormData entries:');
+            for (let pair of formData.entries()) {
+              console.log(pair[0]+ ': ' + (pair[1] instanceof File || pair[1] instanceof Blob ? `Blob/File, name: ${pair[1].name}, size: ${pair[1].size}` : pair[1]));
             }
-            
-            console.log('- Mask data URL length:', reqBody.mask?.length || 0);
           }
           
-          // Add optional parameters if present
-          if (settings.negative_prompt) reqBody.negative_prompt = settings.negative_prompt;
-          if (settings.aspect_ratio) reqBody.aspect_ratio = settings.aspect_ratio;
-          if (settings.resolution && settings.resolution !== 'None') reqBody.resolution = settings.resolution;
-          if (settings.magic_prompt_option) reqBody.magic_prompt_option = settings.magic_prompt_option;
-          if (settings.style_type && settings.style_type !== 'None') reqBody.style_type = settings.style_type;
-          if (typeof settings.seed === 'number') reqBody.seed = settings.seed;
+          const response = await axios.post(currentReplicateEndpoint, dataPayload);
           
-          // Remove any undefined/null/empty values
-          Object.keys(reqBody).forEach(key => {
-            if (reqBody[key] === undefined || reqBody[key] === null || reqBody[key] === '') {
-              delete reqBody[key];
-            }
-          });
-          
-          console.log('Sending request to Replicate with:', Object.keys(reqBody));
-          
-          const response = await axios.post(
-            import.meta.env.VITE_BACKEND_URL + '/api/replicate/ideogram',
-            reqBody
-          );
-          
-          // Replicate returns an array of image URLs
           setResult(response.data.output);
           console.log('Received result from Replicate:', response.data.output);
+
         } catch (err) {
-          console.error('Error generating image (Replicate):', err);
-          setError(err?.response?.data?.error || 'Failed to generate image (Replicate).');
+          console.error('Error processing Replicate request:', err);
+          let errorMessage = 'Failed to generate or edit image (Replicate).';
+          if (err.response) {
+            errorMessage = err.response.data?.error || err.response.data?.detail || errorMessage;
+          } else if (err.request) {
+            errorMessage = 'No response from Replicate server. Check network or server status.';
+          } else {
+            errorMessage = err.message || errorMessage;
+          }
+          setError(errorMessage);
         } finally {
           setLoading(false);
           if (timerIntervalId) clearInterval(timerIntervalId);

@@ -564,11 +564,15 @@ app.post('/api/replicate/ideogram', async (req, res) => {
 // --- Replicate Image Edit with Mask Endpoint ---
 app.post('/api/replicate/edit', async (req, res) => {
   try {
+    console.log('[REPLICATE EDIT] Received request body:', JSON.stringify(req.body, null, 2));
+    console.log('[REPLICATE EDIT] Received prompt from req.body.prompt:', req.body.prompt);
+    console.log('[REPLICATE EDIT] Received files:', req.files ? Object.keys(req.files) : 'No files');
+
     if (!REPLICATE_API_TOKEN) {
       return res.status(500).json({ error: 'Missing REPLICATE_API_TOKEN in .env' });
     }
 
-    console.log('[REPLICATE EDIT] Incoming request to /api/replicate/edit');
+    console.log('[REPLICATE EDIT] Incoming request to /api/replicate/edit'); // This line already existed, good to keep
     const replicate = new Replicate({ auth: REPLICATE_API_TOKEN });
 
     // Extract request parameters
