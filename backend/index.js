@@ -7,6 +7,7 @@ import fs from 'fs';
 import path from 'path';
 import { dirname } from 'path';
 import { fileURLToPath } from 'url';
+import fileUpload from 'express-fileupload';
 
 dotenv.config();
 
@@ -16,6 +17,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '50mb' })); // Increased limit for larger images
+app.use(fileUpload());
 
 const PORT = process.env.PORT || 5000;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
